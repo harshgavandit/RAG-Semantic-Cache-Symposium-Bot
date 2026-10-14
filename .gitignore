@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+runtime/
+*.log
+.DS_Store
+# Unused legacy metadata; the public index uses verified JSON.
+vector_store/index.pkl
+data/*.pdf
+vector_store/*
+!vector_store/README.md
+*.pem
+*.key
+credentials*.json

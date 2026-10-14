@@ -1,0 +1,13 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.ps1 text eol=crlf
+*.pdf binary
+*.jpg binary
+*.faiss binary
+# Preserve the exact bytes covered by documents_sha256 in the index manifest.
+vector_store/documents.json -text whitespace=cr-at-eol

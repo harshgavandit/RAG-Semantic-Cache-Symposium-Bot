@@ -1,0 +1,89 @@
+{
+  "checks": {
+    "configured_model": true,
+    "grounded_date": true,
+    "exact_hit_and_sources": true,
+    "semantic_hit_and_sources": true,
+    "unsupported_refusal": true,
+    "blank_rejected": true,
+    "http_429_with_retry": true,
+    "atomic_concurrency": true,
+    "shared_denial": true,
+    "expiry_restores_admission": true,
+    "invalid_redis_fails_closed": true
+  },
+  "responses": {
+    "first": {
+      "answer": "Innovate 2026 will take place on March 15, 2026 [Page 1].",
+      "sources": [
+        "Page 1",
+        "Page 5",
+        "Page 2"
+      ],
+      "cache_hit": false,
+      "similarity": null,
+      "seconds": 2.265
+    },
+    "repeat": {
+      "answer": "Innovate 2026 will take place on March 15, 2026 [Page 1].",
+      "sources": [
+        "Page 1",
+        "Page 5",
+        "Page 2"
+      ],
+      "cache_hit": true,
+      "similarity": 1.0,
+      "seconds": 0.011
+    },
+    "paraphrase": {
+      "answer": "Innovate 2026 will take place on March 15, 2026 [Page 1].",
+      "sources": [
+        "Page 1",
+        "Page 5",
+        "Page 2"
+      ],
+      "cache_hit": true,
+      "similarity": 0.8752,
+      "seconds": 0.351
+    },
+    "unsupported": {
+      "answer": "I could not find an answer to this question in the symposium document.",
+      "sources": [],
+      "cache_hit": false,
+      "similarity": null,
+      "seconds": 1.101
+    }
+  },
+  "health": {
+    "status": "ready",
+    "model": "gpt-4o-mini",
+    "embedding_model": "text-embedding-3-small",
+    "vectors": 9,
+    "dimensions": 1536,
+    "cache_backend": "local-sqlite",
+    "rate_limit_enabled": true,
+    "rate_limit_requests": 10,
+    "llm_rate_limit_requests": 60,
+    "rate_limit_window_seconds": 60
+  },
+  "retry_after": 39,
+  "rate_limit_statuses": [
+    200,
+    200,
+    200,
+    200,
+    200,
+    429
+  ],
+  "stats": {
+    "hits": 7,
+    "misses": 3,
+    "total": 10,
+    "hit_rate": "70.0%",
+    "cost_saved_usd": null,
+    "cache_backend": "local-sqlite",
+    "cost_note": "Not estimated; no pricing table is configured for the local cache."
+  },
+  "concurrent_admitted": 3,
+  "passed": true
+}
