@@ -15,3 +15,5 @@ vector_store/*
 *.pem
 *.key
 credentials*.json
+.vercel/
+deploy_data/

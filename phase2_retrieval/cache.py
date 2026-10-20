@@ -127,6 +127,9 @@ class ValkeySemanticCache:
 
 
 async def create_cache(settings, namespace, embeddings, root):
+    if settings.cache_backend == "redis":
+        from phase2_retrieval.redis_cache import RedisSemanticCache
+        return RedisSemanticCache(settings, namespace)
     if settings.cache_backend in {"auto", "valkey"}:
         import valkey.asyncio as valkey
         from betterdb_semantic_cache import SemanticCache, SemanticCacheOptions

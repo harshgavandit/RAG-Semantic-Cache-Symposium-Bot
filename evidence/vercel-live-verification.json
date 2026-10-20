@@ -1,0 +1,84 @@
+{
+  "checks": {
+    "configured_model": true,
+    "grounded_date": true,
+    "exact_hit_and_sources": true,
+    "semantic_hit_and_sources": true,
+    "unsupported_refusal": true,
+    "blank_rejected": true,
+    "http_429_with_retry": true,
+    "atomic_concurrency": true,
+    "shared_denial": true,
+    "expiry_restores_admission": true,
+    "invalid_redis_fails_closed": true
+  },
+  "responses": {
+    "first": {
+      "answer": "The Innovate 2026 symposium is scheduled for March 15, 2026 [Page 1].",
+      "sources": [
+        "Page 1"
+      ],
+      "cache_hit": true,
+      "similarity": 0.8751,
+      "seconds": 1.485
+    },
+    "repeat": {
+      "answer": "The Innovate 2026 symposium is scheduled for March 15, 2026 [Page 1].",
+      "sources": [
+        "Page 1"
+      ],
+      "cache_hit": true,
+      "similarity": 0.8751,
+      "seconds": 1.386
+    },
+    "paraphrase": {
+      "answer": "The Innovate 2026 symposium is scheduled for March 15, 2026 [Page 1].",
+      "sources": [
+        "Page 1"
+      ],
+      "cache_hit": true,
+      "similarity": 1.0,
+      "seconds": 0.825
+    },
+    "unsupported": {
+      "answer": "I could not find an answer to this question in the symposium document.",
+      "sources": [],
+      "cache_hit": false,
+      "similarity": null,
+      "seconds": 1.957
+    }
+  },
+  "health": {
+    "status": "ready",
+    "model": "gpt-4o-mini",
+    "embedding_model": "text-embedding-3-small",
+    "vectors": 1,
+    "dimensions": 1536,
+    "cache_backend": "upstash-redis",
+    "rate_limit_enabled": true,
+    "rate_limit_requests": 10,
+    "llm_rate_limit_requests": 60,
+    "rate_limit_window_seconds": 60
+  },
+  "retry_after": 46,
+  "rate_limit_statuses": [
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    429
+  ],
+  "stats": {
+    "hits": 10,
+    "misses": 2,
+    "total": 12,
+    "hit_rate": "83.3%",
+    "cost_saved_usd": null,
+    "cache_backend": "upstash-redis",
+    "cost_note": "No pricing-based savings estimate configured."
+  },
+  "concurrent_admitted": 3,
+  "passed": true
+}

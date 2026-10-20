@@ -1,9 +1,12 @@
 """FastAPI RAG with configured models, persistent caching and Redis admission."""
 import asyncio
+import os
 import re
 from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from openai import APIError, APITimeoutError, RateLimitError
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -34,6 +37,7 @@ class ChatResponse(BaseModel):
 
 
 def create_app(settings=None):
+    hosted = settings.hosted if settings is not None else os.getenv("VERCEL") == "1"
     @asynccontextmanager
     async def lifespan(app):
         s = settings or Settings.from_env()
@@ -68,6 +72,9 @@ def create_app(settings=None):
     async def chat(payload: ChatRequest, request: Request):
         s = app.state.settings
         identity = request.client.host if request.client else "unknown"
+        if s.hosted:
+            # Vercel overwrites this header at the platform boundary.
+            identity = request.headers.get("x-vercel-forwarded-for", identity).split(",")[0].strip()
         await admit("client", identity, s.rate_limit_requests)
         cache = app.state.cache
         try:
@@ -139,7 +146,12 @@ def create_app(settings=None):
 
     @app.get("/")
     def root():
-        return {"status": "Backend is running", "message": "Use /chat endpoint to ask questions"}
+        if hosted:
+            return RedirectResponse("/index.html")
+        return FileResponse(ROOT / "public" / "index.html")
+
+    if not hosted:
+        app.mount("/assets", StaticFiles(directory=ROOT / "public" / "assets"), name="assets")
 
     return app
 

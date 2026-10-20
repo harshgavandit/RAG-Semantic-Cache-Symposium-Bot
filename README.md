@@ -2,6 +2,10 @@
 
 FastAPI and Streamlit chatbot that answers from `data/symposium.pdf`, with OpenAI embeddings, a local FAISS index, semantic answer caching, and shared Upstash Redis rate limits.
 
+**Live demo: [symposium-rag-bot.vercel.app](https://symposium-rag-bot.vercel.app)**
+
+The hosted demo uses a browser-native chat interface, the existing FastAPI retrieval pipeline and shared Upstash Redis caching. It answers from the fictional, contact-free sample guide. The original local PDF is not deployed. Streamlit remains available for local use.
+
 ## Features
 
 [![Tests](https://github.com/harshgavandit/RAG-Semantic-Cache-Symposium-Bot/actions/workflows/tests.yml/badge.svg)](https://github.com/harshgavandit/RAG-Semantic-Cache-Symposium-Bot/actions/workflows/tests.yml)
@@ -11,7 +15,7 @@ FastAPI and Streamlit chatbot that answers from `data/symposium.pdf`, with OpenA
 - Shared Redis admission with atomic Lua operations, retry headers and fail-closed handling.
 - Verified FAISS vectors and JSON metadata without pickle deserialization.
 - Clear timeout, rate-limit, provider and connection errors in the API and chat UI.
-- 34 regression tests, repeatable live-service checks and recorded browser evidence.
+- 42 regression tests, repeatable live-service checks and recorded browser evidence.
 
 ![Cached answer with preserved PDF sources](evidence/frontend-cache-hit.jpg)
 
@@ -147,7 +151,7 @@ After changing the PDF or embedding model, run `python -m phase1_ingestion.inges
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` |
 | `LLM_RATE_LIMIT_REQUESTS` | `60`; global requests that need provider work per window |
 | `RATE_LIMIT_PREFIX` | `symposium:ratelimit`; use a unique prefix for independent deployments |
-| `CACHE_BACKEND` | `auto`, `local`, or `valkey` |
+| `CACHE_BACKEND` | `auto`, `local`, `valkey`, or `redis`; Vercel requires `redis` |
 | `CACHE_THRESHOLD` | `0.15` cosine distance; accepts similarity at least `0.85` |
 | `CACHE_TTL_SECONDS` | `86400` |
 | `CACHE_MAX_ENTRIES` | `256` per corpus/model namespace in the local cache |
@@ -227,3 +231,13 @@ For any platform, the offline test command is `python -m pytest -q`. GitHub Acti
 | Paraphrase cache latency | 0.351 seconds; similarity 0.8752 |
 
 Latencies are single-run local observations, not production guarantees. The optional Valkey branch has not been live-verified. The local cache does not fabricate pricing-based dollar savings.
+
+## Vercel deployment
+
+The live version runs on Vercel's Python 3.12 FastAPI runtime. Static browser assets are served by Vercel's CDN. The cloud build generates the fictional sample PDF and verified index under `deploy_data/`, which is isolated from local PDFs and indexes. Hosted cache entries, counters and limits are shared through Upstash REST; the app does not write SQLite data on Vercel.
+
+`pyproject.toml` lists only the hosted runtime dependencies. `.vercelignore` excludes private documents, generated local indexes, `.env` files, virtual environments, logs and development artifacts. Production credentials are Vercel server-side secrets, never frontend configuration.
+
+To deploy to your own Vercel account, link a project with `npx vercel link`, add `OPENAI_API_KEY`, `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` as production environment variables, then run `npx vercel deploy --prod`. Set optional model and rate-limit variables as needed. Do not paste credentials into source files or CLI arguments.
+
+See [deployment details](docs/vercel-deployment.md), [hosted verification](evidence/vercel-verification-report.md) and [public API evidence](evidence/vercel-live-verification.json). Hosted checks include real generation, exact and paraphrase hits, refusal, HTTP 429, Redis concurrency and visible browser citations. The live demo is a bounded learning project; the existing limitations concerning semantic false hits, citation entailment and public-use cost still apply.

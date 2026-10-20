@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Ask questions about Innovate 2026 and get clear answers with sources from the symposium document.">
+  <meta name="theme-color" content="#f6f8fc">
+  <title>Symposium — Ask the document</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%232b5ce6'/%3E%3Ctext x='24' y='34' text-anchor='middle' fill='white' font-family='sans-serif' font-size='32'%3ES%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Document and suggestions">
+      <a class="brand" href="/" aria-label="Symposium home"><span class="brand-icon">S</span><span>Symposium<span class="brand-sub">THE DOCUMENT ASSISTANT</span></span></a>
+      <div class="document-card"><div class="document-icon" aria-hidden="true">▤</div><span class="eyebrow">YOUR DOCUMENT</span><h2>Innovate 2026</h2><p>A guide to the events, schedule and everything you need to know.</p><div class="document-meta"><span class="file-tag">PDF</span><span>Fictional symposium guide</span></div></div>
+      <div class="suggestions"><h2>Start with a question</h2><button class="suggestion" data-question="What date is the Innovate 2026 symposium scheduled for?">When is the symposium?<span aria-hidden="true">↗</span></button><button class="suggestion" data-question="Who is eligible to participate in Innovate 2026?">Who can participate?<span aria-hidden="true">↗</span></button><button class="suggestion" data-question="What technical events are available?">Explore the technical events<span aria-hidden="true">↗</span></button><button class="suggestion" data-question="What is the registration fee?">How much is registration?<span aria-hidden="true">↗</span></button></div>
+      <div class="sidebar-bottom"><span class="small-icon" aria-hidden="true">◇</span><p>Grounded in the document.<br>Every answer comes with context.</p></div>
+    </aside>
+    <main>
+      <header class="topbar"><span class="section-name">Document chat</span><span id="service-status" class="status"><span class="status-dot"></span>Connecting</span></header>
+      <section class="intro"><div class="intro-tag">A LITTLE CLARITY GOES A LONG WAY</div><h1>Your symposium,<br><span>explained.</span></h1><p>Skip the searching. Ask a question and find the details you need, straight from the guide.</p><div class="intro-features"><span>✓ Answers with sources</span><span>✓ Follow your curiosity</span></div></section>
+      <section class="conversation" aria-label="Chat conversation"><div class="conversation-heading"><h2>Conversation</h2><button id="clear-chat" class="text-button" type="button">Clear chat</button></div><div id="messages" role="log" aria-label="Messages" aria-live="polite"><div id="empty-state" class="empty-state"><span class="empty-symbol" aria-hidden="true">✧</span><h3>What would you like to know?</h3><p>Ask about the date, venue, events or registration.<br>I’ll help you find it in the document.</p></div></div></section>
+      <div class="composer-area"><div id="error-message" class="error" role="alert" hidden></div><form id="chat-form"><label class="sr-only" for="question">Your question about the symposium</label><textarea id="question" name="question" maxlength="4000" rows="1" placeholder="Ask anything about the symposium…" required></textarea><button id="send" type="submit" aria-label="Send question"><span aria-hidden="true">↑</span></button></form><p class="composer-note">This demo uses a fictional event guide. Answers stay within the document.</p></div>
+      <footer><span>Made for questions. Built around the source.</span><a href="https://github.com/harshgavandit/RAG-Semantic-Cache-Symposium-Bot" target="_blank" rel="noopener noreferrer">View project <span aria-hidden="true">↗</span></a></footer>
+    </main>
+  </div>
+</body>
+</html>

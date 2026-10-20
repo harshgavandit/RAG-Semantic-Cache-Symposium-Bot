@@ -1,0 +1,25 @@
+{
+  "statuses": {
+    "/": 200,
+    "/health": 200,
+    "/assets/app.js": 200,
+    "/assets/styles.css": 200,
+    "/.env": 404,
+    "/data/symposium.pdf": 404,
+    "/vector_store/documents.json": 404
+  },
+  "secrets_absent": true,
+  "health": {
+    "status": "ready",
+    "model": "gpt-4o-mini",
+    "embedding_model": "text-embedding-3-small",
+    "vectors": 1,
+    "dimensions": 1536,
+    "cache_backend": "upstash-redis",
+    "rate_limit_enabled": true,
+    "rate_limit_requests": 10,
+    "llm_rate_limit_requests": 60,
+    "rate_limit_window_seconds": 60
+  },
+  "private_paths_404": true
+}

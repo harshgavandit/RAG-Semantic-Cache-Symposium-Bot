@@ -31,6 +31,8 @@ class Settings:
     valkey_password: str = field(default="", repr=False)
     valkey_tls: bool = False
     backend_url: str = "http://127.0.0.1:8000"
+    hosted: bool = False
+    data_root: Path = ROOT
 
     @classmethod
     def from_env(cls, values=None):
@@ -67,9 +69,12 @@ class Settings:
                 raise ValueError
         except ValueError:
             raise ValueError("CACHE_THRESHOLD must be between 0 and 0.3") from None
-        backend = get("CACHE_BACKEND", "auto").lower()
-        if backend not in {"auto", "local", "valkey"}:
-            raise ValueError("CACHE_BACKEND must be auto, local, or valkey")
+        hosted = get("VERCEL") == "1"
+        backend = get("CACHE_BACKEND", "redis" if hosted else "auto").lower()
+        if backend not in {"auto", "local", "valkey", "redis"} or (hosted and backend != "redis"):
+            raise ValueError("CACHE_BACKEND must be redis on Vercel, or auto/local/valkey/redis locally")
+        if backend == "redis" and (parsed.scheme != "https" or not parsed.hostname or not token):
+            raise ValueError("UPSTASH credentials are required for Redis caching")
         model = get("LLM_MODEL") or get("OPENAI_MODEL") or "gpt-4o-mini"
         return cls(api_key=key, redis_url=url.rstrip("/"), redis_token=token, model=model,
             embedding_model=get("EMBEDDING_MODEL", "text-embedding-3-small"),
@@ -78,10 +83,11 @@ class Settings:
             rate_limit_enabled=enabled, rate_limit_requests=positive("RATE_LIMIT_REQUESTS", 10),
             llm_rate_limit_requests=positive("LLM_RATE_LIMIT_REQUESTS", 60),
             window=positive("RATE_LIMIT_WINDOW_SECONDS", 60),
-            rate_limit_prefix=get("RATE_LIMIT_PREFIX", "symposium:ratelimit"),
+            rate_limit_prefix=get("RATE_LIMIT_PREFIX", "symposium:hosted:ratelimit" if hosted else "symposium:ratelimit"),
             cache_backend=backend, cache_threshold=threshold,
             cache_ttl=positive("CACHE_TTL_SECONDS", 86400),
             cache_max_entries=positive("CACHE_MAX_ENTRIES", 256),
             valkey_host=get("VALKEY_HOST", "localhost"), valkey_port=positive("VALKEY_PORT", 6379),
             valkey_password=get("VALKEY_PASSWORD"), valkey_tls=boolean("VALKEY_TLS", "false"),
-            backend_url=get("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/"))
+            backend_url=get("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/"),
+            hosted=hosted, data_root=ROOT / "deploy_data" if hosted else ROOT)

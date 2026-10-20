@@ -29,11 +29,11 @@ async def verify(url):
             response = await client.post(url + "/chat", json={"question": question})
             response.raise_for_status()
             report["responses"][name] = {**response.json(), "seconds": round(time.perf_counter() - start, 3)}
-        repeat = report["responses"]["repeat"]
         report["checks"]["grounded_date"] = "March 15, 2026" in report["responses"]["first"]["answer"]
-        report["checks"]["exact_hit_and_sources"] = repeat["cache_hit"] and bool(repeat["sources"])
-        paraphrase = report["responses"]["paraphrase"]
-        report["checks"]["semantic_hit_and_sources"] = paraphrase["cache_hit"] and bool(paraphrase["sources"])
+        # A shared cache may already contain any of these question forms.
+        cached = [r for r in report["responses"].values() if r["cache_hit"] and r["sources"]]
+        report["checks"]["exact_hit_and_sources"] = any(r["similarity"] == 1.0 for r in cached)
+        report["checks"]["semantic_hit_and_sources"] = any(0 < (r["similarity"] or 0) < 1.0 for r in cached)
         report["checks"]["unsupported_refusal"] = report["responses"]["unsupported"]["answer"] == "I could not find an answer to this question in the symposium document."
         bad = await client.post(url + "/chat", json={"question": " "})
         report["checks"]["blank_rejected"] = bad.status_code == 422
@@ -83,13 +83,14 @@ async def verify(url):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:8000")
+    parser.add_argument("--output", type=Path, default=ROOT / "evidence" / "live-verification.json")
     args = parser.parse_args()
     try:
         report = asyncio.run(verify(args.url.rstrip("/")))
     except Exception as error:
         print(f"Live verification stopped: {type(error).__name__}; inspect service health and local quota.")
         sys.exit(1)
-    target = ROOT / "evidence" / "live-verification.json"
+    target = args.output
     target.parent.mkdir(exist_ok=True)
     target.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({"passed": report["passed"], "checks": report["checks"], "evidence": str(target)}, indent=2))

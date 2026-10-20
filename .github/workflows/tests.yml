@@ -31,6 +31,6 @@ jobs:
       - name: Check dependency consistency
         run: python -m pip check
       - name: Check Python syntax
-        run: python -m compileall -q config.py phase1_ingestion phase2_retrieval scripts tests demo_embeddings.py
+        run: python -m compileall -q config.py app.py phase1_ingestion phase2_retrieval scripts tests demo_embeddings.py
       - name: Run offline regression suite
         run: python -m pytest -q

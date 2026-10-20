@@ -14,12 +14,13 @@ def file_hash(path):
 
 
 def load_vector_store(settings):
-    path = ROOT / "vector_store"
+    root = settings.data_root if settings.hosted else ROOT
+    path = root / "vector_store"
     if not (path / "manifest.json").exists():
         raise RuntimeError("Run python -m phase1_ingestion.ingest to build the verified index first.")
     manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
     if (manifest["embedding_model"] != settings.embedding_model
-            or manifest["pdf_sha256"] != file_hash(ROOT / "data" / "symposium.pdf")
+            or manifest["pdf_sha256"] != file_hash(root / "data" / "symposium.pdf")
             or manifest["index_sha256"] != file_hash(path / "index.faiss")
             or manifest["documents_sha256"] != file_hash(path / "documents.json")):
         raise RuntimeError("Vector index, document or embedding model changed; re-run ingestion.")

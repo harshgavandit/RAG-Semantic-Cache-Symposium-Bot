@@ -13,9 +13,10 @@ from config import ROOT, Settings
 from phase2_retrieval.resources import file_hash
 
 
-def ingest():
-    settings = Settings.from_env()
-    pdf = ROOT / "data" / "symposium.pdf"
+def ingest(settings=None, root=None):
+    settings = settings or Settings.from_env()
+    root = root or (settings.data_root if settings.hosted else ROOT)
+    pdf = root / "data" / "symposium.pdf"
     documents = PyPDFLoader(str(pdf)).load()
     chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(documents)
     chunks = [doc for doc in chunks if doc.page_content.strip()]
@@ -26,7 +27,7 @@ def ingest():
     embeddings = OpenAIEmbeddings(api_key=settings.api_key, model=settings.embedding_model,
         request_timeout=settings.timeout, max_retries=0)
     store = FAISS.from_documents(chunks, embeddings)
-    target = ROOT / "vector_store"
+    target = root / "vector_store"
     target.mkdir(exist_ok=True)
     faiss.write_index(store.index, str(target / "index.faiss"))
     (target / "documents.json").write_text(json.dumps([
