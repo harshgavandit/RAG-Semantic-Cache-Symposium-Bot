@@ -101,7 +101,7 @@ def create_app(settings=None):
                     f"If the excerpts do not answer the question, reply exactly: {NO_ANSWER}\n\nExcerpts:\n{context}")),
                 HumanMessage(content=payload.question)]), timeout=s.timeout)
             answer = response.content
-            if not isinstance(answer, str) or not answer.strip() or response.response_metadata.get("finish_reason") == "length":
+            if not isinstance(answer, str) or not answer.strip() or response.response_metadata.get("finish_reason") != "stop":
                 raise HTTPException(502, "The model returned an empty or incomplete answer. Please retry.")
             answer = answer.strip()
             if answer == NO_ANSWER:

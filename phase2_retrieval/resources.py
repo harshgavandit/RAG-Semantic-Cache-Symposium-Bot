@@ -8,6 +8,9 @@ from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain_core.documents import Document
 from config import ROOT
 
+# Cached responses must satisfy the currently enforced output contract.
+CACHE_RESPONSE_POLICY = "prompt-v2:completion-stop-v1"
+
 
 def file_hash(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -32,8 +35,8 @@ def load_vector_store(settings):
     embeddings = OpenAIEmbeddings(api_key=settings.api_key, model=settings.embedding_model,
         request_timeout=settings.timeout, max_retries=0)
     store = FAISS(embeddings, index, InMemoryDocstore(docs), {i: str(i) for i in range(len(docs))})
-    namespace = hashlib.sha256((manifest["pdf_sha256"] + manifest["index_sha256"]
-        + settings.embedding_model + settings.model + str(settings.cache_threshold) + "prompt-v2").encode()).hexdigest()[:24]
+    namespace = hashlib.sha256((manifest["pdf_sha256"] + manifest["index_sha256"] + manifest["documents_sha256"]
+        + settings.embedding_model + settings.model + str(settings.cache_threshold) + CACHE_RESPONSE_POLICY).encode()).hexdigest()[:24]
     return embeddings, store, namespace
 
 

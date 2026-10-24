@@ -27,12 +27,14 @@ Question → client admission → exact cache lookup
 | Engineering choice | Mechanism |
 | --- | --- |
 | Shared cache | [`redis_cache.py`](phase2_retrieval/redis_cache.py) stores answers, vectors, source labels, expiry times, and bounded ordering in Upstash Redis. Lua updates perform insertion and eviction atomically. |
-| Cache invalidation | [`resources.py`](phase2_retrieval/resources.py) derives the namespace from PDF/index hashes, embedding and answer models, threshold, and prompt version. An edited corpus cannot silently reuse a prior namespace. |
+| Cache invalidation | [`resources.py`](phase2_retrieval/resources.py) derives the namespace from PDF, index and document-text/metadata hashes, embedding and answer models, threshold, and response-policy version. Changed citation metadata or the strict completion policy selects a new namespace, preventing stale cached answers from bypassing the updated context. |
 | Admission before paid work | [`backend.py`](phase2_retrieval/backend.py) admits clients before lookup and uses a separate shared gate before query embedding. Exact hits avoid provider calls; semantic hits still require a query embedding. |
 | Safe index loading | The loader checks corpus/index/metadata hashes and embedding dimensions, then reads FAISS plus JSON metadata rather than deserializing a pickle. |
-| Answer boundary | Non-refusal answers require page labels present in the retrieved passages; incomplete outputs and dependency failures return explicit errors. |
+| Answer boundary | Non-refusal answers require page labels present in the retrieved passages. Only a completed `stop` generation can enter the cache; truncated, filtered, tool-call and unknown completion states return explicit errors. |
 
 Default cache settings are 256 entries and a 24-hour TTL per namespace. Semantic matching uses a cosine-distance threshold, so similar wording can reuse an answer. Citation-label checks validate page membership, not factual entailment.
+
+The local Valkey adapter uses the same bounded hash/Lua contract as the Redis adapter, with a cosine scan of the configured entry limit. It reuses the query vector supplied by the handler, supports exact lookups before embedding, and does not require a vector-search module. This is a small bounded cache, not an indexed ANN service. Switching from the previous BetterDB adapter starts a new cache key layout; persisted document indexes remain unchanged. The legacy BetterDB package remains pinned in the dependency file but is no longer imported by the request path.
 
 ## Run locally
 

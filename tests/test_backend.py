@@ -71,7 +71,9 @@ def test_limiter_blocks_before_embeddings_and_llm(tmp_path, monkeypatch, kind, e
 
 
 @pytest.mark.parametrize("answer,finish", [("", "stop"), ("Partial [Page 1]", "length"),
-    ("Made up [Page 99]", "stop"), ("Uncited answer", "stop")])
+    ("Made up [Page 99]", "stop"), ("Uncited answer", "stop"),
+    ("Filtered [Page 1]", "content_filter"), ("Partial [Page 1]", "tool_calls"),
+    ("Partial [Page 1]", None), ("Partial [Page 1]", "unknown")])
 def test_invalid_generation_never_enters_cache(tmp_path, monkeypatch, answer, finish):
     client, calls = make_client(tmp_path, monkeypatch, answer=answer, finish=finish)
     with client:

@@ -99,70 +99,23 @@ class LocalSemanticCache:
         pass
 
 
-class ValkeySemanticCache:
-    backend = "valkey-betterdb"
-
-    def __init__(self, cache, client):
-        self.cache, self.client = cache, client
-
-    async def exact(self, question):
-        return None
-
-    async def check(self, question, vector):
-        result = await self.cache.check(question)
-        if not result.hit:
-            return None
-        payload = json.loads(result.response)
-        return CacheHit(payload["answer"], payload["sources"], 1 - (result.similarity or 0))
-
-    async def store(self, question, vector, answer, sources, **usage):
-        from betterdb_semantic_cache.types import CacheStoreOptions
-        await self.cache.store(question, json.dumps({"answer": answer, "sources": sources}),
-                               CacheStoreOptions(**usage))
-
-    async def record(self, hit):
-        pass  # BetterDB records lookups itself.
-
-    async def stats(self):
-        s = await self.cache.stats()
-        return {"hits": s.hits, "misses": s.misses, "total": s.total,
-                "hit_rate": f"{s.hit_rate:.1%}", "cost_saved_usd": f"${s.cost_saved_micros / 1_000_000:.4f}",
-                "cache_backend": self.backend}
-
-    async def shutdown(self):
-        try:
-            await self.cache.shutdown()
-        finally:
-            await self.client.aclose()
-
-
 async def create_cache(settings, namespace, embeddings, root):
     if settings.cache_backend == "redis":
         from phase2_retrieval.redis_cache import RedisSemanticCache
         return RedisSemanticCache(settings, namespace)
     if settings.cache_backend in {"auto", "valkey"}:
         import valkey.asyncio as valkey
-        from betterdb_semantic_cache import SemanticCache, SemanticCacheOptions
-        from betterdb_semantic_cache.types import AnalyticsOptions, DiscoveryOptions, ConfigRefreshOptions
+        from phase2_retrieval.valkey_cache import ValkeySemanticCache
         client = valkey.Valkey(host=settings.valkey_host, port=settings.valkey_port,
             password=settings.valkey_password or None, ssl=settings.valkey_tls,
             socket_connect_timeout=2, socket_timeout=2)
-        cache = None
         try:
             await client.ping()
-            cache = SemanticCache(SemanticCacheOptions(client=client,
-                embed_fn=embeddings.aembed_query, name=f"symposium_{namespace}",
-                default_threshold=settings.cache_threshold, default_ttl=settings.cache_ttl,
-                analytics=AnalyticsOptions(disabled=True), discovery=DiscoveryOptions(enabled=False),
-                config_refresh=ConfigRefreshOptions(enabled=False)))
-            await cache.initialize()
-            return ValkeySemanticCache(cache, client)
+            return ValkeySemanticCache(settings, namespace, client)
         except Exception:
-            if cache is not None:
-                await cache.shutdown()
             await client.aclose()
             if settings.cache_backend == "valkey":
-                raise RuntimeError("Valkey cache unavailable. Start Valkey with its search module or choose CACHE_BACKEND=local.") from None
+                raise RuntimeError("Valkey cache unavailable. Start Valkey or choose CACHE_BACKEND=local.") from None
             print("Valkey unavailable; using persistent local SQLite semantic cache.")
     return LocalSemanticCache(root / "runtime" / "semantic-cache.sqlite3", namespace,
         settings.cache_threshold, settings.cache_ttl, settings.cache_max_entries)
