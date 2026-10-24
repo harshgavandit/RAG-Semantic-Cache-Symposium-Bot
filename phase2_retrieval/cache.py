@@ -4,6 +4,7 @@ import hashlib
 import json
 import sqlite3
 import time
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 import numpy as np
 
@@ -19,6 +20,15 @@ def normalize(question):
     return " ".join(question.strip().split())
 
 
+@contextmanager
+def connection(path):
+    # sqlite3's own context manager commits/rolls back, but does not close.
+    # Nest it inside closing so both transaction and handle lifetimes are bounded.
+    with closing(sqlite3.connect(path)) as db:
+        with db:
+            yield db
+
+
 class LocalSemanticCache:
     backend = "local-sqlite"
 
@@ -26,7 +36,7 @@ class LocalSemanticCache:
         self.path, self.namespace = path, namespace
         self.threshold, self.ttl, self.max_entries = threshold, ttl, max_entries
         path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(path) as db:
+        with connection(path) as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("CREATE TABLE IF NOT EXISTS entries (namespace TEXT, question TEXT, vector TEXT, answer TEXT, sources TEXT, expires REAL, created REAL, PRIMARY KEY(namespace,question))")
             db.execute("CREATE TABLE IF NOT EXISTS stats (namespace TEXT PRIMARY KEY, hits INTEGER DEFAULT 0, misses INTEGER DEFAULT 0)")
@@ -38,7 +48,7 @@ class LocalSemanticCache:
         return await asyncio.to_thread(self._lookup, question, vector)
 
     def _lookup(self, question, vector):
-        with sqlite3.connect(self.path) as db:
+        with connection(self.path) as db:
             rows = db.execute("SELECT question,vector,answer,sources FROM entries WHERE namespace=? AND expires>? ORDER BY rowid DESC", (self.namespace, time.time())).fetchall()
         for q, stored, answer, sources in rows:
             if q == normalize(question):
@@ -62,7 +72,7 @@ class LocalSemanticCache:
 
     def _store(self, question, vector, answer, sources):
         now = time.time()
-        with sqlite3.connect(self.path) as db:
+        with connection(self.path) as db:
             db.execute("DELETE FROM entries WHERE expires<=?", (now,))
             db.execute("INSERT OR REPLACE INTO entries VALUES (?,?,?,?,?,?,?)", (self.namespace, normalize(question), json.dumps(vector), answer, json.dumps(sources), now + self.ttl, time.time_ns()))
             # rowid gives insertion order even when clocks tie or move backwards.
@@ -70,14 +80,14 @@ class LocalSemanticCache:
 
     async def record(self, hit):
         def write():
-            with sqlite3.connect(self.path) as db:
+            with connection(self.path) as db:
                 db.execute("INSERT OR IGNORE INTO stats(namespace) VALUES (?)", (self.namespace,))
                 db.execute("UPDATE stats SET hits=hits+?,misses=misses+? WHERE namespace=?", (int(hit), int(not hit), self.namespace))
         await asyncio.to_thread(write)
 
     async def stats(self):
         def read():
-            with sqlite3.connect(self.path) as db:
+            with connection(self.path) as db:
                 return db.execute("SELECT hits,misses FROM stats WHERE namespace=?", (self.namespace,)).fetchone() or (0, 0)
         hits, misses = await asyncio.to_thread(read)
         return {"hits": hits, "misses": misses, "total": hits + misses,

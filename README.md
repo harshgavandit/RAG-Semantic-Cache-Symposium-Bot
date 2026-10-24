@@ -2,7 +2,7 @@
 
 A PDF question-answering application with page citations, exact and semantic answer reuse, and Redis request admission. The hosted FastAPI app shares a bounded cache across serverless instances; local development also supports SQLite and Valkey cache adapters.
 
-[Live demo](https://symposium-rag-bot.vercel.app) · [Tests](https://github.com/harshgavandit/RAG-Semantic-Cache-Symposium-Bot/actions/workflows/tests.yml) · [Hosted verification](evidence/vercel-verification-report.md)
+[Live demo](https://symposium-rag-bot.vercel.app) · [Tests](https://github.com/harshgavandit/RAG-Semantic-Cache-Symposium-Bot/actions/workflows/tests.yml) · [Workload and recovery evidence](benchmarks/README.md)
 
 **Stack:** Python 3.12, FastAPI, OpenAI, LangChain, FAISS, Upstash Redis, SQLite/Valkey, Streamlit, Vercel.
 
@@ -91,6 +91,12 @@ python scripts/verify_live.py --url http://127.0.0.1:8000
 This makes real embedding/generation requests, exercises cache behavior and HTTP errors, and uses isolated expiring Redis counters to check atomic admission and recovery. It writes a local verification report and consumes provider quota.
 
 The [20 October hosted report](evidence/vercel-verification-report.md) records observed provider, cache, citation, and denial checks. It reports a one-page, one-chunk public sample; that demonstration does not establish retrieval quality for a larger corpus. No cost-savings or throughput figure is claimed.
+
+## Workload and recovery measurements
+
+The [benchmark guide](benchmarks/README.md) contains reproducible commands and retained reports. A local SQLite workload completed **9,000 operations** across three trials at concurrency 1, 4 and 8 with zero operation errors or expected-result mismatches. Four workers outperformed eight on this machine, so the report retains the contention tradeoff rather than claiming linear scaling.
+
+The workload exposed unclosed SQLite handles; explicit connection closure now preserves transactions and rollback, with regression tests. Six adapter recovery checks and 18 isolated HTTP observations cover TTL refill, bounded eviction, writer contention, unavailable dependencies and recovery. The HTTP drill uses injected providers. A separate **real Redis drill** used 15 commands against isolated expiring keys: exactly three of 12 concurrent attempts were admitted, identities remained separate, and admission resumed after expiry. These are controlled development measurements, separate from the hosted Redis cache and production traffic.
 
 ## Deployment and limits
 

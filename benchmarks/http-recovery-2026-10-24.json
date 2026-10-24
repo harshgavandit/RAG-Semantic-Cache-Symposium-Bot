@@ -1,0 +1,321 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-10-24T13:10:38.182447+00:00",
+  "runtime": {
+    "python": "3.12.14",
+    "httpx": "0.28.1",
+    "sqlite": "3.53.1",
+    "platform": "Windows"
+  },
+  "scope": "In-process HTTP/ASGI recovery simulation using actual create_app handlers and SQLite adapter, with injected deterministic embedding/model/retrieval and injected limiter states. No external Redis, AI, HTTP network or paid work.",
+  "limitations": "Status and counter evidence proves handler ordering/recovery under injected faults; does not prove real Redis atomicity, provider quality, deployment health or production operation. Production lifespan intentionally bypassed.",
+  "source": {
+    "head_sha": "44e80d87926fd18c0d205fd63c7a24bd4227d69f",
+    "working_tree_dirty": true,
+    "sha256": {
+      "phase2_retrieval/cache.py": "844095d5ecb44b53ac163fd52f5ab1f8ee9261db02302c90e957bc732eba4c89",
+      "benchmarks/cache_workload.py": "364403c3866d571ed15e0598d43077494bc3c6a451a20591469450a0bd19abe4",
+      "benchmarks/http_recovery.py": "76f7260677b2ed6929aac80890dcc3c68e939f97e18899e42854c078b032f124",
+      "phase2_retrieval/backend.py": "6c7d17a10cf795fcbab9dd9f5e1f6b326f8aba52fdd210ceb6db0e23eb4ffd34",
+      "phase2_retrieval/rate_limit.py": "f0b57b8f925f9578f8ec37104613e8e74da9f014f4ebac211176176bcc982000",
+      "config.py": "703b6b802c11975f10dd5ec33a89ce1c3b62a010cd7de8c88c31e55299ac2142"
+    }
+  },
+  "observations": [
+    {
+      "scenario": "cold_request",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 8.260700000391807,
+      "injected_component_calls": {
+        "embeddings": 1,
+        "llm": 1,
+        "retrieval": 1
+      },
+      "admission_scopes": [
+        "client",
+        "provider"
+      ],
+      "cache_hit": false,
+      "retry_after": null
+    },
+    {
+      "scenario": "exact_warm_request",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 3.382200000487501,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client"
+      ],
+      "cache_hit": true,
+      "retry_after": null
+    },
+    {
+      "scenario": "semantic_warm_request",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 3.796900000452297,
+      "injected_component_calls": {
+        "embeddings": 1,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client",
+        "provider"
+      ],
+      "cache_hit": true,
+      "retry_after": null
+    },
+    {
+      "scenario": "client_limit_before_provider_work",
+      "passed": true,
+      "http_status": 429,
+      "duration_ms": 0.24090000079013407,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client"
+      ],
+      "cache_hit": null,
+      "retry_after": "7"
+    },
+    {
+      "scenario": "client_limit_recovery",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 6.2837000004947186,
+      "injected_component_calls": {
+        "embeddings": 1,
+        "llm": 1,
+        "retrieval": 1
+      },
+      "admission_scopes": [
+        "client",
+        "provider"
+      ],
+      "cache_hit": false,
+      "retry_after": null
+    },
+    {
+      "scenario": "limiter_health_unavailable",
+      "passed": true,
+      "http_status": 503,
+      "duration_ms": 0.31269999817595817,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [],
+      "cache_hit": null,
+      "retry_after": null
+    },
+    {
+      "scenario": "limiter_unavailable_before_provider_work",
+      "passed": true,
+      "http_status": 503,
+      "duration_ms": 0.2421000026515685,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client"
+      ],
+      "cache_hit": null,
+      "retry_after": null
+    },
+    {
+      "scenario": "limiter_health_recovered",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 1.3079999989713542,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [],
+      "cache_hit": null,
+      "retry_after": null
+    },
+    {
+      "scenario": "limiter_recovery_exact_warm",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 3.0442999996012077,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client"
+      ],
+      "cache_hit": true,
+      "retry_after": null
+    },
+    {
+      "scenario": "provider_admission_unavailable_before_embedding",
+      "passed": true,
+      "http_status": 503,
+      "duration_ms": 0.874699999258155,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client",
+        "provider"
+      ],
+      "cache_hit": null,
+      "retry_after": null
+    },
+    {
+      "scenario": "provider_admission_recovered_semantic_hit",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 3.6600999992515426,
+      "injected_component_calls": {
+        "embeddings": 1,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client",
+        "provider"
+      ],
+      "cache_hit": true,
+      "retry_after": null
+    },
+    {
+      "scenario": "cache_health_unavailable",
+      "passed": true,
+      "http_status": 503,
+      "duration_ms": 0.4612000011547934,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [],
+      "cache_hit": null,
+      "retry_after": null
+    },
+    {
+      "scenario": "cache_unavailable_before_provider_work",
+      "passed": true,
+      "http_status": 503,
+      "duration_ms": 0.37199999860604294,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client"
+      ],
+      "cache_hit": null,
+      "retry_after": null
+    },
+    {
+      "scenario": "cache_health_recovered",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 0.8568000012019183,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [],
+      "cache_hit": null,
+      "retry_after": null
+    },
+    {
+      "scenario": "cache_recovery_exact_warm",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 2.8817999991588295,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client"
+      ],
+      "cache_hit": true,
+      "retry_after": null
+    },
+    {
+      "scenario": "ttl_cold_fill",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 6.298699998296797,
+      "injected_component_calls": {
+        "embeddings": 1,
+        "llm": 1,
+        "retrieval": 1
+      },
+      "admission_scopes": [
+        "client",
+        "provider"
+      ],
+      "cache_hit": false,
+      "retry_after": null
+    },
+    {
+      "scenario": "ttl_before_expiry",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 2.900200001022313,
+      "injected_component_calls": {
+        "embeddings": 0,
+        "llm": 0,
+        "retrieval": 0
+      },
+      "admission_scopes": [
+        "client"
+      ],
+      "cache_hit": true,
+      "retry_after": null
+    },
+    {
+      "scenario": "ttl_expired_refill",
+      "passed": true,
+      "http_status": 200,
+      "duration_ms": 7.453199999872595,
+      "injected_component_calls": {
+        "embeddings": 1,
+        "llm": 1,
+        "retrieval": 1
+      },
+      "admission_scopes": [
+        "client",
+        "provider"
+      ],
+      "cache_hit": false,
+      "retry_after": null
+    }
+  ],
+  "total_injected_component_calls": {
+    "embeddings": 6,
+    "llm": 4,
+    "retrieval": 4
+  },
+  "actual_provider_requests": 0,
+  "temporary_state_removed": true,
+  "passed": true
+}

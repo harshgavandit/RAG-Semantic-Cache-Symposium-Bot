@@ -1,0 +1,815 @@
+{
+  "schema_version": 1,
+  "started_at_utc": "2026-10-24T13:06:42.734487+00:00",
+  "scope": "Real local SQLite adapter timings on labelled seeded synthetic vectors; no embedding, retrieval, model, HTTP or hosted Redis calls.",
+  "runtime": {
+    "python": "3.12.14",
+    "numpy": "2.5.4",
+    "sqlite": "3.53.1",
+    "platform": "Windows",
+    "machine": "AMD64",
+    "processor": "Intel64 Family 6 Model 197 Stepping 2, GenuineIntel"
+  },
+  "source": {
+    "head_sha": "44e80d87926fd18c0d205fd63c7a24bd4227d69f",
+    "working_tree_dirty": true,
+    "sha256": {
+      "phase2_retrieval/cache.py": "844095d5ecb44b53ac163fd52f5ab1f8ee9261db02302c90e957bc732eba4c89",
+      "benchmarks/cache_workload.py": "364403c3866d571ed15e0598d43077494bc3c6a451a20591469450a0bd19abe4"
+    }
+  },
+  "settings": {
+    "operations_per_trial": 1000,
+    "trials_per_concurrency": 3,
+    "concurrency": [
+      1,
+      4,
+      8
+    ],
+    "seed": 20261024,
+    "vector_dimensions": 64,
+    "seed_entries": 32,
+    "max_entries": 256,
+    "ttl_seconds": 3600,
+    "distance_threshold": 0.1,
+    "operation_mix": {
+      "exact": 0.5,
+      "semantic": 0.2,
+      "miss": 0.2,
+      "store": 0.1
+    }
+  },
+  "measurement": {
+    "clock": "perf_counter",
+    "percentiles": "sorted linear interpolation, rank=(n-1)*p/100",
+    "latency_scope": "adapter await including its thread scheduling; excludes workload queue wait and setup",
+    "throughput_scope": "completed attempts divided by worker wall time, includes failures",
+    "state": "new temporary SQLite database for each trial; removed after run",
+    "provider_requests": 0,
+    "usd_estimate": null,
+    "limitations": "Closed-loop local workload; synthetic vectors are not evidence of embedding/model quality, production traffic, availability, SLO or hosted Redis performance."
+  },
+  "trials": [
+    {
+      "attempted": 1000,
+      "successful": 1000,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 0.6031999982951675,
+        "p50": 1.070899999831454,
+        "p95": 2.5196000000505587,
+        "p99": 3.2841600018218733,
+        "max": 5.665099997713696
+      },
+      "elapsed_seconds": 1.1873957999996492,
+      "attempted_per_second": 842.1791621633624,
+      "successful_per_second": 842.1791621633624,
+      "by_operation": {
+        "exact": {
+          "attempted": 500,
+          "successful": 500,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.6031999982951675,
+            "p50": 0.7593499994982267,
+            "p95": 1.1141250006403427,
+            "p99": 1.476739998433913,
+            "max": 3.2761000002210494
+          }
+        },
+        "miss": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.9926999991876073,
+            "p50": 1.2355500002740882,
+            "p95": 1.7411049999282115,
+            "p99": 2.43831500178203,
+            "max": 2.984999999171123
+          }
+        },
+        "semantic": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.9707000026537571,
+            "p50": 1.2350500001048204,
+            "p95": 1.731390000713873,
+            "p99": 2.6476880012341986,
+            "max": 3.115899999102112
+          }
+        },
+        "store": {
+          "attempted": 100,
+          "successful": 100,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.9219999994675163,
+            "p50": 2.456599999277387,
+            "p95": 3.728094998768938,
+            "p99": 5.395325000026789,
+            "max": 5.665099997713696
+          }
+        }
+      },
+      "trial": 1,
+      "concurrency": 1,
+      "seed": 20261024,
+      "setup_store_calls_excluded": 32
+    },
+    {
+      "attempted": 1000,
+      "successful": 1000,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 0.5653000007441733,
+        "p50": 1.0201000004599337,
+        "p95": 2.39273999886791,
+        "p99": 2.9733920010039583,
+        "max": 4.173199999058852
+      },
+      "elapsed_seconds": 1.1180683000020508,
+      "attempted_per_second": 894.3997428405454,
+      "successful_per_second": 894.3997428405454,
+      "by_operation": {
+        "exact": {
+          "attempted": 500,
+          "successful": 500,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.5653000007441733,
+            "p50": 0.7222999993246049,
+            "p95": 0.9832449974055636,
+            "p99": 1.2631470018823163,
+            "max": 1.4389999996637926
+          }
+        },
+        "miss": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.9270999980799388,
+            "p50": 1.213100000313716,
+            "p95": 1.5063249977174564,
+            "p99": 1.7264560009789403,
+            "max": 2.0177000005787704
+          }
+        },
+        "semantic": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.8631000018795021,
+            "p50": 1.2096999998902902,
+            "p95": 1.5432449992658803,
+            "p99": 2.0376429996758785,
+            "max": 2.8385999976308085
+          }
+        },
+        "store": {
+          "attempted": 100,
+          "successful": 100,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.9118999989586882,
+            "p50": 2.3896499988040887,
+            "p95": 3.2077800018669222,
+            "p99": 3.328828998455724,
+            "max": 4.173199999058852
+          }
+        }
+      },
+      "trial": 2,
+      "concurrency": 1,
+      "seed": 20261025,
+      "setup_store_calls_excluded": 32
+    },
+    {
+      "attempted": 1000,
+      "successful": 1000,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 0.6309000018518418,
+        "p50": 1.360799999019946,
+        "p95": 3.768074999970849,
+        "p99": 5.292348999209934,
+        "max": 14.05220000015106
+      },
+      "elapsed_seconds": 1.630438399999548,
+      "attempted_per_second": 613.3319725543003,
+      "successful_per_second": 613.3319725543003,
+      "by_operation": {
+        "exact": {
+          "attempted": 500,
+          "successful": 500,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.6309000018518418,
+            "p50": 0.9411999999429099,
+            "p95": 1.9195750004655567,
+            "p99": 2.8375170028448333,
+            "max": 3.6338999998406507
+          }
+        },
+        "miss": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.0068000010505784,
+            "p50": 1.5129999992495868,
+            "p95": 2.863690000049246,
+            "p99": 3.407169000165595,
+            "max": 3.563500002201181
+          }
+        },
+        "semantic": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.9732999969855882,
+            "p50": 1.556400000481517,
+            "p95": 3.0519500029186024,
+            "p99": 3.8384149967532672,
+            "max": 5.449699998280266
+          }
+        },
+        "store": {
+          "attempted": 100,
+          "successful": 100,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 2.4606999977550004,
+            "p50": 3.720400000020163,
+            "p95": 5.506595000406378,
+            "p99": 7.540079000464209,
+            "max": 14.05220000015106
+          }
+        }
+      },
+      "trial": 3,
+      "concurrency": 1,
+      "seed": 20261026,
+      "setup_store_calls_excluded": 32
+    },
+    {
+      "attempted": 1000,
+      "successful": 1000,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 0.3782999992836267,
+        "p50": 2.615849998619524,
+        "p95": 14.069605000440776,
+        "p99": 32.8229750031096,
+        "max": 62.653699998918455
+      },
+      "elapsed_seconds": 1.055796200002078,
+      "attempted_per_second": 947.1524902230486,
+      "successful_per_second": 947.1524902230486,
+      "by_operation": {
+        "exact": {
+          "attempted": 500,
+          "successful": 500,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.3782999992836267,
+            "p50": 1.7946500011021271,
+            "p95": 7.858800002031802,
+            "p99": 21.193033001982215,
+            "max": 60.77260000165552
+          }
+        },
+        "miss": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.8233999978983775,
+            "p50": 3.716999997777748,
+            "p95": 18.80842499977008,
+            "p99": 41.58332300055914,
+            "max": 62.653699998918455
+          }
+        },
+        "semantic": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.0202999983448535,
+            "p50": 3.5576000009314157,
+            "p95": 9.648864998780487,
+            "p99": 19.614674001968517,
+            "max": 27.773500001785578
+          }
+        },
+        "store": {
+          "attempted": 100,
+          "successful": 100,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.3653999994858168,
+            "p50": 3.2876500008569565,
+            "p95": 32.84487500295654,
+            "p99": 42.21617400002289,
+            "max": 44.61929999888525
+          }
+        }
+      },
+      "trial": 1,
+      "concurrency": 4,
+      "seed": 20261024,
+      "setup_store_calls_excluded": 32
+    },
+    {
+      "attempted": 1000,
+      "successful": 1000,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 0.3956000000471249,
+        "p50": 2.3585499984619673,
+        "p95": 11.72084000118047,
+        "p99": 28.768901001603787,
+        "max": 74.33790000141016
+      },
+      "elapsed_seconds": 0.9405313999995997,
+      "attempted_per_second": 1063.2287236773016,
+      "successful_per_second": 1063.2287236773016,
+      "by_operation": {
+        "exact": {
+          "attempted": 500,
+          "successful": 500,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.3956000000471249,
+            "p50": 1.6746500004956033,
+            "p95": 9.912169999188349,
+            "p99": 19.040369999165698,
+            "max": 74.33790000141016
+          }
+        },
+        "miss": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.9781999979168177,
+            "p50": 2.829850000125589,
+            "p95": 10.59339000039472,
+            "p99": 19.639543000303057,
+            "max": 55.42500000228756
+          }
+        },
+        "semantic": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.9696999986772425,
+            "p50": 3.507649998937268,
+            "p95": 9.10243499929494,
+            "p99": 20.551629001420103,
+            "max": 53.93430000185617
+          }
+        },
+        "store": {
+          "attempted": 100,
+          "successful": 100,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.0991999988618772,
+            "p50": 2.7230499999859603,
+            "p95": 28.31416500175692,
+            "p99": 34.12020000174393,
+            "max": 60.51360000128625
+          }
+        }
+      },
+      "trial": 2,
+      "concurrency": 4,
+      "seed": 20261025,
+      "setup_store_calls_excluded": 32
+    },
+    {
+      "attempted": 1000,
+      "successful": 1000,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 0.3890999978466425,
+        "p50": 2.1467499991558725,
+        "p95": 8.289885000885958,
+        "p99": 27.190125000379336,
+        "max": 46.83890000160318
+      },
+      "elapsed_seconds": 0.8503149999996822,
+      "attempted_per_second": 1176.0347635880512,
+      "successful_per_second": 1176.0347635880512,
+      "by_operation": {
+        "exact": {
+          "attempted": 500,
+          "successful": 500,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.3890999978466425,
+            "p50": 1.5125000008993084,
+            "p95": 5.975990000843013,
+            "p99": 22.03436799911286,
+            "max": 41.814899999735644
+          }
+        },
+        "miss": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.8555999993404839,
+            "p50": 2.8940499996679137,
+            "p95": 11.8575100015733,
+            "p99": 40.297173003164055,
+            "max": 46.83890000160318
+          }
+        },
+        "semantic": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.0584000010567252,
+            "p50": 3.1432499999937136,
+            "p95": 10.172275000695663,
+            "p99": 25.675246999344367,
+            "max": 30.593100000260165
+          }
+        },
+        "store": {
+          "attempted": 100,
+          "successful": 100,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.2301999995543156,
+            "p50": 2.520800000638701,
+            "p95": 17.98657500021362,
+            "p99": 28.76011500171448,
+            "max": 37.08750000077998
+          }
+        }
+      },
+      "trial": 3,
+      "concurrency": 4,
+      "seed": 20261026,
+      "setup_store_calls_excluded": 32
+    },
+    {
+      "attempted": 1000,
+      "successful": 1000,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 1.6173000003618654,
+        "p50": 13.051299998551258,
+        "p95": 19.734640000751824,
+        "p99": 22.904180001423807,
+        "max": 31.076899998879526
+      },
+      "elapsed_seconds": 1.5809353999975428,
+      "attempted_per_second": 632.5369145390471,
+      "successful_per_second": 632.5369145390471,
+      "by_operation": {
+        "exact": {
+          "attempted": 500,
+          "successful": 500,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 2.674200000910787,
+            "p50": 11.871000000610366,
+            "p95": 16.739749999578635,
+            "p99": 18.791676999353513,
+            "max": 21.014800000557443
+          }
+        },
+        "miss": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 5.500700000993675,
+            "p50": 16.089349999674596,
+            "p95": 21.41343499733921,
+            "p99": 24.032409001374617,
+            "max": 26.530399998591747
+          }
+        },
+        "semantic": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 4.824999999982538,
+            "p50": 15.947300000334508,
+            "p95": 21.368519999487038,
+            "p99": 23.949748999475556,
+            "max": 26.724799998191884
+          }
+        },
+        "store": {
+          "attempted": 100,
+          "successful": 100,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.6173000003618654,
+            "p50": 3.022150000106194,
+            "p95": 8.918149997225548,
+            "p99": 19.890395000729825,
+            "max": 31.076899998879526
+          }
+        }
+      },
+      "trial": 1,
+      "concurrency": 8,
+      "seed": 20261024,
+      "setup_store_calls_excluded": 32
+    },
+    {
+      "attempted": 1000,
+      "successful": 1000,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 1.2005999997199979,
+        "p50": 13.040399999226793,
+        "p95": 21.084969997173175,
+        "p99": 25.778907000603795,
+        "max": 54.401000001234934
+      },
+      "elapsed_seconds": 1.6110932000010507,
+      "attempted_per_second": 620.696555605441,
+      "successful_per_second": 620.696555605441,
+      "by_operation": {
+        "exact": {
+          "attempted": 500,
+          "successful": 500,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.2005999997199979,
+            "p50": 12.099550000129966,
+            "p95": 17.85357499811653,
+            "p99": 21.37722700092126,
+            "max": 30.73479999875417
+          }
+        },
+        "miss": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 3.478999999060761,
+            "p50": 15.759550000439049,
+            "p95": 22.65414500143379,
+            "p99": 25.827752000623104,
+            "max": 32.603100000415
+          }
+        },
+        "semantic": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 3.645400000095833,
+            "p50": 15.549350000583217,
+            "p95": 22.39169499844138,
+            "p99": 27.833371999076903,
+            "max": 29.767700001684716
+          }
+        },
+        "store": {
+          "attempted": 100,
+          "successful": 100,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.7308999995293561,
+            "p50": 3.1090999982552603,
+            "p95": 6.43520999929023,
+            "p99": 19.845544997370048,
+            "max": 54.401000001234934
+          }
+        }
+      },
+      "trial": 2,
+      "concurrency": 8,
+      "seed": 20261025,
+      "setup_store_calls_excluded": 32
+    },
+    {
+      "attempted": 1000,
+      "successful": 1000,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 1.5439000017067883,
+        "p50": 13.212750000093365,
+        "p95": 20.109895000314282,
+        "p99": 24.1884059979202,
+        "max": 45.17629999827477
+      },
+      "elapsed_seconds": 1.5974270000006072,
+      "attempted_per_second": 626.0066970194067,
+      "successful_per_second": 626.0066970194067,
+      "by_operation": {
+        "exact": {
+          "attempted": 500,
+          "successful": 500,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 2.0074000021850225,
+            "p50": 12.078550000296673,
+            "p95": 16.71186499806936,
+            "p99": 19.3670059969736,
+            "max": 24.82139999847277
+          }
+        },
+        "miss": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 4.93579999965732,
+            "p50": 15.631599999323953,
+            "p95": 20.390494999264778,
+            "p99": 22.603708000242456,
+            "max": 26.72299999903771
+          }
+        },
+        "semantic": {
+          "attempted": 200,
+          "successful": 200,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 4.218400001263944,
+            "p50": 16.087750000224332,
+            "p95": 21.921469999324472,
+            "p99": 26.015212999373023,
+            "max": 28.246499998203944
+          }
+        },
+        "store": {
+          "attempted": 100,
+          "successful": 100,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.5439000017067883,
+            "p50": 3.2845000005181646,
+            "p95": 15.491094997742039,
+            "p99": 36.045133997940916,
+            "max": 45.17629999827477
+          }
+        }
+      },
+      "trial": 3,
+      "concurrency": 8,
+      "seed": 20261026,
+      "setup_store_calls_excluded": 32
+    }
+  ],
+  "recovery_probes": [
+    {
+      "scenario": "cold_warm_reopen",
+      "passed": true,
+      "cold_miss": true,
+      "warm_hit": true,
+      "reopened_hit": true
+    },
+    {
+      "scenario": "bounded_eviction",
+      "passed": true,
+      "oldest_missing": true,
+      "newest_present": true,
+      "resident_entries": 2,
+      "max_entries": 2
+    },
+    {
+      "scenario": "real_clock_expiry_and_refill",
+      "passed": true,
+      "ttl_seconds": 0.1,
+      "waited_seconds": 0.21488329999920097,
+      "expired_miss": true,
+      "refill_hit": true
+    },
+    {
+      "scenario": "database_unavailable_and_restore",
+      "passed": true,
+      "failure_type": "OperationalError",
+      "failure_latency_ms": 0.6800000010116491,
+      "restored_hit": true,
+      "injection": "Private adapter path temporarily points to an absent parent directory"
+    },
+    {
+      "scenario": "writer_lock_and_release",
+      "passed": true,
+      "failure_type": "OperationalError",
+      "failure_latency_ms": 5462.748300000385,
+      "recovered_write_and_read": true,
+      "injection": "BEGIN IMMEDIATE held on a second connection until adapter timeout"
+    },
+    {
+      "scenario": "explicit_stats_accounting",
+      "passed": true,
+      "hits": 1,
+      "misses": 1,
+      "total": 2
+    }
+  ],
+  "temporary_state_removed": true,
+  "passed": true
+}

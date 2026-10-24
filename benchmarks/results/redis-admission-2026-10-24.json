@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "recorded_at_utc": "2026-10-24T13:11:09.687065+00:00",
+  "scope": "Real Upstash REST admission, concurrent Lua counter and TTL expiry; separate injected HTTP-503 fail-closed probe. No model calls or production user traffic.",
+  "source_base_commit": "44e80d87926fd18c0d205fd63c7a24bd4227d69f",
+  "source_sha256": {
+    "phase2_retrieval/rate_limit.py": "f0b57b8f925f9578f8ec37104613e8e74da9f014f4ebac211176176bcc982000",
+    "benchmarks/redis_admission.py": "2d2cfccef415cea29d47c3cabceca74a7e1e5ac22ec6b2044af454211185b839"
+  },
+  "namespace_policy": "Random evidence:admission UUID prefix, five-second keys, no read/write of application namespaces; no FLUSH or broad deletion.",
+  "configuration": {
+    "limit": 3,
+    "window_seconds": 5,
+    "concurrent_attempts": 12,
+    "max_commands": 16
+  },
+  "observations": [
+    {
+      "name": "atomic_concurrent_limit",
+      "passed": true
+    },
+    {
+      "name": "identity_isolation",
+      "passed": true
+    },
+    {
+      "name": "real_ttl_recovery",
+      "passed": true,
+      "counter": 1,
+      "ttl_ms": 4999
+    },
+    {
+      "name": "injected_503_fails_closed",
+      "passed": true,
+      "simulated": true
+    }
+  ],
+  "attempts": [
+    {
+      "status": "allowed",
+      "counter": 1,
+      "ttl_ms": 4999,
+      "elapsed_ms": 7.71
+    },
+    {
+      "status": "allowed",
+      "counter": 2,
+      "ttl_ms": 4949,
+      "elapsed_ms": 76.217
+    },
+    {
+      "status": "allowed",
+      "counter": 3,
+      "ttl_ms": 4949,
+      "elapsed_ms": 77.317
+    },
+    {
+      "status": "denied",
+      "retry_after_seconds": 5,
+      "elapsed_ms": 77.78
+    },
+    {
+      "status": "denied",
+      "retry_after_seconds": 5,
+      "elapsed_ms": 83.197
+    },
+    {
+      "status": "denied",
+      "retry_after_seconds": 5,
+      "elapsed_ms": 83.284
+    },
+    {
+      "status": "denied",
+      "retry_after_seconds": 5,
+      "elapsed_ms": 83.074
+    },
+    {
+      "status": "denied",
+      "retry_after_seconds": 5,
+      "elapsed_ms": 87.316
+    },
+    {
+      "status": "denied",
+      "retry_after_seconds": 5,
+      "elapsed_ms": 87.234
+    },
+    {
+      "status": "denied",
+      "retry_after_seconds": 5,
+      "elapsed_ms": 87.351
+    },
+    {
+      "status": "denied",
+      "retry_after_seconds": 5,
+      "elapsed_ms": 87.358
+    },
+    {
+      "status": "denied",
+      "retry_after_seconds": 5,
+      "elapsed_ms": 87.028
+    }
+  ],
+  "real_redis_commands": 15,
+  "passed": true
+}

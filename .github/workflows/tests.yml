@@ -31,6 +31,17 @@ jobs:
       - name: Check dependency consistency
         run: python -m pip check
       - name: Check Python syntax
-        run: python -m compileall -q config.py app.py phase1_ingestion phase2_retrieval scripts tests demo_embeddings.py
+        run: python -m compileall -q config.py app.py phase1_ingestion phase2_retrieval scripts tests benchmarks demo_embeddings.py
       - name: Run offline regression suite
         run: python -m pytest -q
+      - name: Run isolated handler recovery drill
+        run: python -m benchmarks.http_recovery --output benchmarks/ci-http-recovery.json
+      - name: Run bounded local cache workload
+        run: python -m benchmarks.cache_workload --operations 100 --trials 1 --concurrency 1 4 8 --seed 20261024 --output benchmarks/ci-cache-workload.json
+      - name: Retain local drill evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cache-drills-${{ github.sha }}
+          path: benchmarks/ci-*.json
+          if-no-files-found: error
+          retention-days: 30
