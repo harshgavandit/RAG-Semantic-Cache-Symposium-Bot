@@ -82,7 +82,7 @@ python -m compileall -q config.py app.py phase1_ingestion phase2_retrieval scrip
 
 The offline suite covers cache reuse and misses, eviction and TTL, Redis cache behavior, source preservation, refusal/citation handling, index validation, rate denial, and hosting configuration. [GitHub Actions](.github/workflows/tests.yml) runs the regression suite on Python 3.12 without a paid provider request.
 
-With the backend, OpenAI, and Redis configured:
+With the included fictional sample indexed, OpenAI and Redis configured, and `RATE_LIMIT_ENABLED=true` (restart the backend after configuration changes):
 
 ```powershell
 python scripts/verify_live.py --url http://127.0.0.1:8000
