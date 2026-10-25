@@ -3,7 +3,7 @@ import argparse
 import asyncio
 from contextlib import closing
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -152,7 +152,10 @@ async def run_trial(root, operations, concurrency, seed, trial):
         await cache.shutdown()
     result = summarize(samples, elapsed)
     result.update({"trial": trial, "concurrency": concurrency, "seed": seed,
-                   "setup_store_calls_excluded": SEED_ENTRIES})
+                   "setup_store_calls_excluded": SEED_ENTRIES,
+                   # Completion order, not admission order. This preserves every
+                   # measured duration/result so aggregate metrics can be checked.
+                   "samples": [asdict(sample) for sample in samples]})
     return result
 
 
@@ -244,7 +247,7 @@ async def run(args):
     import numpy
     root = Path(__file__).resolve().parents[1]
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "scope": "Real local SQLite adapter timings on labelled seeded synthetic vectors; no embedding, retrieval, model, HTTP or hosted Redis calls.",
         "runtime": {"python": platform.python_version(), "numpy": numpy.__version__,
@@ -263,6 +266,12 @@ async def run(args):
                         "provider_requests": 0, "usd_estimate": None,
                         "limitations": "Closed-loop local workload; synthetic vectors are not evidence of embedding/model quality, production traffic, availability, SLO or hosted Redis performance."},
         "trials": [],
+    }
+    # These two public source files contain no runtime configuration. Retaining
+    # exact UTF-8 bytes avoids pretending a base Git SHA identifies dirty sources.
+    report["source"]["snapshots"] = {
+        path: (root / path).read_bytes().decode("utf-8")
+        for path in report["source"]["sha256"]
     }
     with tempfile.TemporaryDirectory(prefix="symposium-benchmark-") as temporary:
         directory = Path(temporary)

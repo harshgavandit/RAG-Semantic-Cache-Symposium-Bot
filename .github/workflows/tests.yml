@@ -38,6 +38,10 @@ jobs:
         run: python -m benchmarks.http_recovery --output benchmarks/ci-http-recovery.json
       - name: Run bounded local cache workload
         run: python -m benchmarks.cache_workload --operations 100 --trials 1 --concurrency 1 4 8 --seed 20261024 --output benchmarks/ci-cache-workload.json
+      - name: Recompute measured cache metrics from raw samples
+        run: |
+          python -S -m benchmarks.verify_cache_workload benchmarks/ci-cache-workload.json
+          python -S -m benchmarks.verify_cache_workload benchmarks/results/local-sqlite-raw-2026-10-25.json
       - name: Retain local drill evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

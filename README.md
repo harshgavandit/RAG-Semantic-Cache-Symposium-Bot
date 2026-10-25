@@ -2,7 +2,7 @@
 
 A PDF question-answering application with page citations, exact and semantic answer reuse, and Redis request admission. The hosted FastAPI app shares a bounded cache across serverless instances; local development also supports SQLite and Valkey cache adapters.
 
-[Live demo](https://symposium-rag-bot.vercel.app) · [Tests](https://github.com/harshgavandit/RAG-Semantic-Cache-Symposium-Bot/actions/workflows/tests.yml) · [Workload and recovery evidence](benchmarks/README.md)
+[Live demo](https://symposium-rag-bot.vercel.app) · [Tests](https://github.com/harshgavandit/RAG-Semantic-Cache-Symposium-Bot/actions/workflows/tests.yml) · [Workload and recovery evidence](benchmarks/README.md) · [Security](SECURITY.md)
 
 **Stack:** Python 3.12, FastAPI, OpenAI, LangChain, FAISS, Upstash Redis, SQLite/Valkey, Streamlit, Vercel.
 

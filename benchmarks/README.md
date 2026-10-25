@@ -13,6 +13,7 @@ Run from the repository root with Python 3.12 and the project dependencies insta
 ```powershell
 python -m benchmarks.cache_workload --operations 1000 --trials 3 --concurrency 1 4 8 --seed 20261024 --output benchmarks/local-sqlite-new.json
 python -m benchmarks.http_recovery --output benchmarks/http-recovery-new.json
+python -m benchmarks.verify_cache_workload benchmarks/local-sqlite-new.json
 python -m pytest -q
 ```
 
@@ -21,6 +22,18 @@ Output files must be new `.json` files in an existing directory. Existing files 
 The cache runner accepts 100–10,000 operations per trial, divisible by ten, 1–5 trials, unique concurrency values from `1, 2, 4, 8`, and at most 30,000 total measured operations. A default run measures 9,000 operations plus bounded setup/recovery calls. The writer-lock recovery probe deliberately waits for SQLite's unchanged busy timeout, about five seconds. The commands open no network listener and make zero external requests; Windows `asyncio` still needs permission to create its internal local socket pair. In a restricted agent sandbox that blocks the socket pair, run the same command in a normal local terminal or grant the narrowly scoped local execution request.
 
 ## Workload and metric boundaries
+
+New cache runs use schema 2 and retain every operation's completion-ordered duration, result and safe error class, plus exact embedded source snapshots. The standard-library verifier recomputes all trial/per-operation counts, latency percentiles and throughput from those samples, checks source hashes, workload coverage, cleanup and the reported pass verdict. It makes no network request and does not import provider libraries. CI verifies its newly generated report and runs corruption regressions. These checks establish internal consistency, not independent execution attestation.
+
+The original 9,000-operation schema-1 report remains byte-for-byte unchanged. It retained trial summaries rather than individual durations, so its percentiles cannot be independently recomputed from the archived JSON. Re-running the documented workload produces a new schema-2 measurement; it does not retroactively recover or replace the original observations.
+
+The separate [25 October raw-sample check](results/local-sqlite-raw-2026-10-25.json) ran 300 operations at concurrency 1, 4 and 8, with zero operation errors or label mismatches and all six recovery probes passing. The verifier checks all 300 recorded samples and both exact source snapshots. This smaller run validates the new evidence path; it is not an additional 9,000-operation result or a benchmark of the hosted Redis cache.
+
+```powershell
+python -S -m benchmarks.verify_cache_workload benchmarks/results/local-sqlite-raw-2026-10-25.json
+```
+
+`-S` disables site-package loading, so this verification needs only the Python standard library.
 
 Each trial creates a new WAL-mode database, stores 32 labelled synthetic entries, then runs a seeded shuffled schedule of 50% exact reads, 20% semantic reads, 20% misses and 10% writes. Vectors have 64 dimensions. Seeded positive basis vectors provide analytically known matches; semantic requests add a small orthogonal perturbation, misses use a disjoint basis direction, and writes use negative basis vectors under separate keys. This verifies cache matching against known labels. It does not measure an embedding model's paraphrase quality or answer quality.
 

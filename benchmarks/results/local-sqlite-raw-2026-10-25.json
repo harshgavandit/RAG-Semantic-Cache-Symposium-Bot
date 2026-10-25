@@ -1,0 +1,2151 @@
+{
+  "schema_version": 2,
+  "started_at_utc": "2026-10-25T13:26:12.540325+00:00",
+  "scope": "Real local SQLite adapter timings on labelled seeded synthetic vectors; no embedding, retrieval, model, HTTP or hosted Redis calls.",
+  "runtime": {
+    "python": "3.12.14",
+    "numpy": "2.5.4",
+    "sqlite": "3.53.1",
+    "platform": "Windows",
+    "machine": "AMD64",
+    "processor": "Intel64 Family 6 Model 197 Stepping 2, GenuineIntel"
+  },
+  "source": {
+    "head_sha": "378227e33170eb5e2298cbecf65994f3cab64821",
+    "working_tree_dirty": true,
+    "sha256": {
+      "phase2_retrieval/cache.py": "7ce0470e1b6eee059ad1ad7033ae6821db3de94e3b86f2ac3dee86a0739ea673",
+      "benchmarks/cache_workload.py": "13c444553040e6cc7d74f124dc94cd378fb24777e6cb70e4cd481c4714b15ed3"
+    },
+    "snapshots": {
+      "phase2_retrieval/cache.py": "\"\"\"Persistent bounded local semantic cache and the optional BetterDB adapter.\"\"\"\nimport asyncio\nimport hashlib\nimport json\nimport sqlite3\nimport time\nfrom contextlib import closing, contextmanager\nfrom dataclasses import dataclass\nimport numpy as np\n\n\n@dataclass\nclass CacheHit:\n    answer: str\n    sources: list[str]\n    similarity: float\n\n\ndef normalize(question):\n    return \" \".join(question.strip().split())\n\n\n@contextmanager\ndef connection(path):\n    # sqlite3's own context manager commits/rolls back, but does not close.\n    # Nest it inside closing so both transaction and handle lifetimes are bounded.\n    with closing(sqlite3.connect(path)) as db:\n        with db:\n            yield db\n\n\nclass LocalSemanticCache:\n    backend = \"local-sqlite\"\n\n    def __init__(self, path, namespace, threshold, ttl, max_entries):\n        self.path, self.namespace = path, namespace\n        self.threshold, self.ttl, self.max_entries = threshold, ttl, max_entries\n        path.parent.mkdir(parents=True, exist_ok=True)\n        with connection(path) as db:\n            db.execute(\"PRAGMA journal_mode=WAL\")\n            db.execute(\"CREATE TABLE IF NOT EXISTS entries (namespace TEXT, question TEXT, vector TEXT, answer TEXT, sources TEXT, expires REAL, created REAL, PRIMARY KEY(namespace,question))\")\n            db.execute(\"CREATE TABLE IF NOT EXISTS stats (namespace TEXT PRIMARY KEY, hits INTEGER DEFAULT 0, misses INTEGER DEFAULT 0)\")\n\n    async def exact(self, question):\n        return await asyncio.to_thread(self._lookup, question, None)\n\n    async def check(self, question, vector):\n        return await asyncio.to_thread(self._lookup, question, vector)\n\n    def _lookup(self, question, vector):\n        with connection(self.path) as db:\n            rows = db.execute(\"SELECT question,vector,answer,sources FROM entries WHERE namespace=? AND expires>? ORDER BY rowid DESC\", (self.namespace, time.time())).fetchall()\n        for q, stored, answer, sources in rows:\n            if q == normalize(question):\n                return CacheHit(answer, json.loads(sources), 1.0)\n        if vector is None:\n            return None\n        v = np.asarray(vector, dtype=float)\n        best = None\n        for q, stored, answer, sources in rows:\n            candidate = np.asarray(json.loads(stored), dtype=float)\n            if candidate.shape != v.shape:\n                continue\n            norm = np.linalg.norm(v) * np.linalg.norm(candidate)\n            similarity = float(np.dot(v, candidate) / norm) if norm else -1.0\n            if similarity >= 1 - self.threshold and (best is None or similarity > best.similarity):\n                best = CacheHit(answer, json.loads(sources), min(1.0, similarity))\n        return best\n\n    async def store(self, question, vector, answer, sources, **usage):\n        await asyncio.to_thread(self._store, question, vector, answer, sources)\n\n    def _store(self, question, vector, answer, sources):\n        now = time.time()\n        with connection(self.path) as db:\n            db.execute(\"DELETE FROM entries WHERE expires<=?\", (now,))\n            db.execute(\"INSERT OR REPLACE INTO entries VALUES (?,?,?,?,?,?,?)\", (self.namespace, normalize(question), json.dumps(vector), answer, json.dumps(sources), now + self.ttl, time.time_ns()))\n            # rowid gives insertion order even when clocks tie or move backwards.\n            db.execute(\"DELETE FROM entries WHERE namespace=? AND question NOT IN (SELECT question FROM entries WHERE namespace=? ORDER BY rowid DESC LIMIT ?)\", (self.namespace, self.namespace, self.max_entries))\n\n    async def record(self, hit):\n        def write():\n            with connection(self.path) as db:\n                db.execute(\"INSERT OR IGNORE INTO stats(namespace) VALUES (?)\", (self.namespace,))\n                db.execute(\"UPDATE stats SET hits=hits+?,misses=misses+? WHERE namespace=?\", (int(hit), int(not hit), self.namespace))\n        await asyncio.to_thread(write)\n\n    async def stats(self):\n        def read():\n            with connection(self.path) as db:\n                return db.execute(\"SELECT hits,misses FROM stats WHERE namespace=?\", (self.namespace,)).fetchone() or (0, 0)\n        hits, misses = await asyncio.to_thread(read)\n        return {\"hits\": hits, \"misses\": misses, \"total\": hits + misses,\n                \"hit_rate\": f\"{hits / (hits + misses):.1%}\" if hits + misses else \"0.0%\",\n                \"cost_saved_usd\": None, \"cache_backend\": self.backend,\n                \"cost_note\": \"Not estimated; no pricing table is configured for the local cache.\"}\n\n    async def shutdown(self):\n        pass\n\n\nasync def create_cache(settings, namespace, embeddings, root):\n    if settings.cache_backend == \"redis\":\n        from phase2_retrieval.redis_cache import RedisSemanticCache\n        return RedisSemanticCache(settings, namespace)\n    if settings.cache_backend in {\"auto\", \"valkey\"}:\n        import valkey.asyncio as valkey\n        from phase2_retrieval.valkey_cache import ValkeySemanticCache\n        client = valkey.Valkey(host=settings.valkey_host, port=settings.valkey_port,\n            password=settings.valkey_password or None, ssl=settings.valkey_tls,\n            socket_connect_timeout=2, socket_timeout=2)\n        try:\n            await client.ping()\n            return ValkeySemanticCache(settings, namespace, client)\n        except Exception:\n            await client.aclose()\n            if settings.cache_backend == \"valkey\":\n                raise RuntimeError(\"Valkey cache unavailable. Start Valkey or choose CACHE_BACKEND=local.\") from None\n            print(\"Valkey unavailable; using persistent local SQLite semantic cache.\")\n    return LocalSemanticCache(root / \"runtime\" / \"semantic-cache.sqlite3\", namespace,\n        settings.cache_threshold, settings.cache_ttl, settings.cache_max_entries)\n",
+      "benchmarks/cache_workload.py": "\"\"\"Measure the real SQLite adapter with labelled synthetic vectors; no providers.\"\"\"\nimport argparse\nimport asyncio\nfrom contextlib import closing\nfrom collections import Counter\nfrom dataclasses import asdict, dataclass\nfrom datetime import datetime, timezone\nimport hashlib\nimport json\nimport math\nfrom pathlib import Path\nimport platform\nimport random\nimport sqlite3\nimport subprocess\nimport tempfile\nimport time\n\n\n@dataclass(frozen=True)\nclass Sample:\n    operation: str\n    duration_ms: float\n    status: str\n    error_type: str = \"\"\n\n\ndef percentile(values, percent):\n    \"\"\"Linear interpolation on sorted observations, rank=(n-1)*p/100.\"\"\"\n    if not values or not 0 <= percent <= 100:\n        raise ValueError(\"percentile requires observations and percent in [0, 100]\")\n    ordered = sorted(values)\n    rank = (len(ordered) - 1) * percent / 100\n    lower, upper = math.floor(rank), math.ceil(rank)\n    return ordered[lower] + (ordered[upper] - ordered[lower]) * (rank - lower)\n\n\ndef summarize(samples, elapsed_seconds):\n    if not samples or elapsed_seconds <= 0:\n        raise ValueError(\"summary requires observations and positive elapsed time\")\n    def group(items):\n        durations = [item.duration_ms for item in items]\n        return {\n            \"attempted\": len(items),\n            \"successful\": sum(item.status == \"ok\" for item in items),\n            \"mismatches\": sum(item.status == \"mismatch\" for item in items),\n            \"errors\": sum(item.status == \"error\" for item in items),\n            \"error_types\": dict(Counter(item.error_type for item in items if item.status == \"error\")),\n            \"latency_ms\": {\"min\": min(durations), \"p50\": percentile(durations, 50),\n                           \"p95\": percentile(durations, 95), \"p99\": percentile(durations, 99),\n                           \"max\": max(durations)},\n        }\n    report = group(samples)\n    report.update({\"elapsed_seconds\": elapsed_seconds,\n                   \"attempted_per_second\": len(samples) / elapsed_seconds,\n                   \"successful_per_second\": report[\"successful\"] / elapsed_seconds,\n                   \"by_operation\": {operation: group([s for s in samples if s.operation == operation])\n                                    for operation in sorted({s.operation for s in samples})}})\n    return report\n\n\nasync def timed_call(operation, call, expected):\n    start = time.perf_counter()\n    try:\n        result = await call()\n        status = \"ok\" if expected(result) else \"mismatch\"\n        return Sample(operation, (time.perf_counter() - start) * 1000, status)\n    except Exception as error:\n        # Exception messages can contain paths/credentials; publish class only.\n        return Sample(operation, (time.perf_counter() - start) * 1000, \"error\", type(error).__name__)\n\n\ndef parse_args(argv=None):\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument(\"--operations\", type=int, default=1000, help=\"per trial, 100..10000, divisible by 10\")\n    parser.add_argument(\"--trials\", type=int, default=3)\n    parser.add_argument(\"--concurrency\", type=int, nargs=\"+\", default=[1, 4, 8])\n    parser.add_argument(\"--seed\", type=int, default=20261024)\n    parser.add_argument(\"--output\", type=Path, help=\"new .json file; existing files are never overwritten\")\n    args = parser.parse_args(argv)\n    if not 100 <= args.operations <= 10000 or args.operations % 10:\n        parser.error(\"operations must be 100..10000 and divisible by 10\")\n    if not 1 <= args.trials <= 5:\n        parser.error(\"trials must be 1..5\")\n    if len(set(args.concurrency)) != len(args.concurrency) or not args.concurrency or any(c not in (1, 2, 4, 8) for c in args.concurrency):\n        parser.error(\"concurrency must contain unique values chosen from 1, 2, 4, 8\")\n    if args.operations * args.trials * len(args.concurrency) > 30000:\n        parser.error(\"total measured operations must not exceed 30000\")\n    if args.output and (args.output.suffix != \".json\" or args.output.exists() or not args.output.parent.is_dir()):\n        parser.error(\"output must be a new .json file in an existing directory\")\n    return args\n\n\nDIMENSIONS = 64\nSEED_ENTRIES = 32\nMAX_ENTRIES = 256\nTTL_SECONDS = 3600\nTHRESHOLD = 0.1\n\n\ndef vector(index, perturbation=0):\n    values = [0.0] * DIMENSIONS\n    values[index] = 1.0\n    values[DIMENSIONS - 2] = perturbation\n    return values\n\n\nasync def run_trial(root, operations, concurrency, seed, trial):\n    from phase2_retrieval.cache import LocalSemanticCache\n    cache = LocalSemanticCache(root / \"cache.sqlite3\", \"synthetic-benchmark\", THRESHOLD, TTL_SECONDS, MAX_ENTRIES)\n    for index in range(SEED_ENTRIES):\n        await cache.store(f\"seed-{index}\", vector(index), f\"answer-{index}\", [f\"synthetic-page-{index}\"])\n    # Keep seed entries resident throughout: writes replace one of 32 separate\n    # questions, so the timed workload has <=64 entries. Eviction has its own probe.\n    labels = [\"exact\"] * (operations // 2) + [\"semantic\"] * (operations // 5)\n    labels += [\"miss\"] * (operations // 5) + [\"store\"] * (operations // 10)\n    rng = random.Random(seed)\n    rng.shuffle(labels)\n    schedule = [(label, rng.randrange(SEED_ENTRIES)) for label in labels]\n    samples = []\n    cursor = 0\n\n    async def worker():\n        nonlocal cursor\n        while cursor < len(schedule):\n            position = cursor\n            cursor += 1  # no await between reservation and increment\n            label, index = schedule[position]\n            if label == \"exact\":\n                call = lambda: cache.exact(f\"seed-{index}\")\n            elif label == \"semantic\":\n                call = lambda: cache.check(f\"paraphrase-{index}\", vector(index, 0.05))\n            elif label == \"miss\":\n                call = lambda: cache.check(\"unrelated\", vector(DIMENSIONS - 1))\n            # Writes use negative vectors, so they cannot steal the semantic hit\n            # from the positive seeded basis vectors.\n            if label == \"store\":\n                call = lambda: cache.store(f\"write-{index}\", [-v for v in vector(index)], \"synthetic-write\", [\"synthetic-write\"])\n            def expected(value):\n                if label in {\"miss\", \"store\"}:\n                    return value is None\n                return (value is not None and value.answer == f\"answer-{index}\"\n                        and value.sources == [f\"synthetic-page-{index}\"]\n                        and 0.99 <= value.similarity <= 1.0)\n            samples.append(await timed_call(label, call, expected))\n\n    start = time.perf_counter()\n    try:\n        await asyncio.gather(*(worker() for _ in range(concurrency)))\n        elapsed = time.perf_counter() - start\n    finally:\n        await cache.shutdown()\n    result = summarize(samples, elapsed)\n    result.update({\"trial\": trial, \"concurrency\": concurrency, \"seed\": seed,\n                   \"setup_store_calls_excluded\": SEED_ENTRIES,\n                   # Completion order, not admission order. This preserves every\n                   # measured duration/result so aggregate metrics can be checked.\n                   \"samples\": [asdict(sample) for sample in samples]})\n    return result\n\n\nasync def recovery_probes(root):\n    \"\"\"Real adapter and real wall clock; all state belongs to this temp directory.\"\"\"\n    from phase2_retrieval.cache import LocalSemanticCache\n    path = root / \"recovery.sqlite3\"\n    cache = LocalSemanticCache(path, \"recovery\", THRESHOLD, 60, 2)\n    probes = []\n    def observation(name, passed, **details):\n        probes.append({\"scenario\": name, \"passed\": bool(passed), **details})\n    cold = await cache.exact(\"first\")\n    await cache.store(\"first\", vector(0), \"first-answer\", [\"synthetic-page\"])\n    warm = await cache.exact(\"first\")\n    reopened = LocalSemanticCache(path, \"recovery\", THRESHOLD, 60, 2)\n    persisted = await reopened.exact(\"first\")\n    observation(\"cold_warm_reopen\", cold is None and warm and persisted\n                and warm.answer == persisted.answer == \"first-answer\",\n                cold_miss=cold is None, warm_hit=warm is not None,\n                reopened_hit=persisted is not None)\n    await cache.store(\"second\", vector(1), \"second\", [])\n    await cache.store(\"third\", vector(2), \"third\", [])\n    oldest, newest = await cache.exact(\"first\"), await cache.exact(\"third\")\n    with closing(sqlite3.connect(path)) as db:\n        entries = db.execute(\"SELECT COUNT(*) FROM entries WHERE namespace='recovery'\").fetchone()[0]\n    observation(\"bounded_eviction\", oldest is None and newest and entries == 2,\n                oldest_missing=oldest is None, newest_present=newest is not None,\n                resident_entries=entries, max_entries=2)\n    ttl_cache = LocalSemanticCache(root / \"ttl.sqlite3\", \"ttl\", THRESHOLD, 0.1, 2)\n    await ttl_cache.store(\"short\", vector(0), \"short\", [])\n    before = await ttl_cache.exact(\"short\")\n    start = time.perf_counter()\n    await asyncio.sleep(0.2)\n    after = await ttl_cache.exact(\"short\")\n    await ttl_cache.store(\"short\", vector(0), \"fresh\", [])\n    refreshed = await ttl_cache.exact(\"short\")\n    observation(\"real_clock_expiry_and_refill\", before and after is None and refreshed\n                and refreshed.answer == \"fresh\", ttl_seconds=0.1,\n                waited_seconds=time.perf_counter() - start,\n                expired_miss=after is None, refill_hit=refreshed is not None)\n    # Opening an unreachable database is a real filesystem dependency failure.\n    # Point only this private adapter at an absent directory; no live data touched.\n    cache.path = root / \"absent-directory\" / \"unavailable.sqlite3\"\n    failure = await timed_call(\"unavailable_read\", lambda: cache.exact(\"third\"), lambda value: False)\n    cache.path = path\n    restored = await cache.exact(\"third\")\n    observation(\"database_unavailable_and_restore\", failure.status == \"error\"\n                and failure.error_type == \"OperationalError\" and restored and restored.answer == \"third\",\n                failure_type=failure.error_type, failure_latency_ms=failure.duration_ms,\n                restored_hit=restored is not None,\n                injection=\"Private adapter path temporarily points to an absent parent directory\")\n    # The adapter's normal SQLite busy timeout is retained (5 seconds). This\n    # verifies a real writer outage, without monkeypatching the driver or clock.\n    with closing(sqlite3.connect(path)) as lock:\n        lock.execute(\"BEGIN IMMEDIATE\")\n        blocked = await timed_call(\"locked_write\", lambda: cache.store(\"locked\", vector(3), \"locked\", []), lambda value: False)\n        lock.rollback()\n    await cache.store(\"recovered\", vector(3), \"recovered\", [])\n    restored = await cache.exact(\"recovered\")\n    observation(\"writer_lock_and_release\", blocked.status == \"error\"\n                and blocked.error_type == \"OperationalError\" and restored and restored.answer == \"recovered\",\n                failure_type=blocked.error_type, failure_latency_ms=blocked.duration_ms,\n                recovered_write_and_read=restored is not None,\n                injection=\"BEGIN IMMEDIATE held on a second connection until adapter timeout\")\n    await cache.record(True)\n    await cache.record(False)\n    stats = await cache.stats()\n    observation(\"explicit_stats_accounting\", stats[\"hits\"] == 1 and stats[\"misses\"] == 1,\n                hits=stats[\"hits\"], misses=stats[\"misses\"], total=stats[\"total\"])\n    await cache.shutdown()\n    await reopened.shutdown()\n    await ttl_cache.shutdown()\n    return probes\n\n\ndef source_identity(root):\n    def git(*args):\n        try:\n            return subprocess.check_output([\"git\", *args], cwd=root, text=True, stderr=subprocess.DEVNULL).strip()\n        except (OSError, subprocess.CalledProcessError):\n            return None\n    paths = [\"phase2_retrieval/cache.py\", \"benchmarks/cache_workload.py\"]\n    return {\"head_sha\": git(\"rev-parse\", \"HEAD\"),\n            \"working_tree_dirty\": bool(git(\"status\", \"--porcelain\")),\n            \"sha256\": {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths}}\n\n\nasync def run(args):\n    import numpy\n    root = Path(__file__).resolve().parents[1]\n    report = {\n        \"schema_version\": 2,\n        \"started_at_utc\": datetime.now(timezone.utc).isoformat(),\n        \"scope\": \"Real local SQLite adapter timings on labelled seeded synthetic vectors; no embedding, retrieval, model, HTTP or hosted Redis calls.\",\n        \"runtime\": {\"python\": platform.python_version(), \"numpy\": numpy.__version__,\n                    \"sqlite\": sqlite3.sqlite_version, \"platform\": platform.system(),\n                    \"machine\": platform.machine(), \"processor\": platform.processor()},\n        \"source\": source_identity(root),\n        \"settings\": {\"operations_per_trial\": args.operations, \"trials_per_concurrency\": args.trials,\n                     \"concurrency\": args.concurrency, \"seed\": args.seed, \"vector_dimensions\": DIMENSIONS,\n                     \"seed_entries\": SEED_ENTRIES, \"max_entries\": MAX_ENTRIES,\n                     \"ttl_seconds\": TTL_SECONDS, \"distance_threshold\": THRESHOLD,\n                     \"operation_mix\": {\"exact\": 0.5, \"semantic\": 0.2, \"miss\": 0.2, \"store\": 0.1}},\n        \"measurement\": {\"clock\": \"perf_counter\", \"percentiles\": \"sorted linear interpolation, rank=(n-1)*p/100\",\n                        \"latency_scope\": \"adapter await including its thread scheduling; excludes workload queue wait and setup\",\n                        \"throughput_scope\": \"completed attempts divided by worker wall time, includes failures\",\n                        \"state\": \"new temporary SQLite database for each trial; removed after run\",\n                        \"provider_requests\": 0, \"usd_estimate\": None,\n                        \"limitations\": \"Closed-loop local workload; synthetic vectors are not evidence of embedding/model quality, production traffic, availability, SLO or hosted Redis performance.\"},\n        \"trials\": [],\n    }\n    # These two public source files contain no runtime configuration. Retaining\n    # exact UTF-8 bytes avoids pretending a base Git SHA identifies dirty sources.\n    report[\"source\"][\"snapshots\"] = {\n        path: (root / path).read_bytes().decode(\"utf-8\")\n        for path in report[\"source\"][\"sha256\"]\n    }\n    with tempfile.TemporaryDirectory(prefix=\"symposium-benchmark-\") as temporary:\n        directory = Path(temporary)\n        for concurrency in args.concurrency:\n            for trial in range(1, args.trials + 1):\n                # Same schedule seed across concurrency levels supports comparison.\n                trial_root = directory / f\"c{concurrency}-t{trial}\"\n                trial_root.mkdir()\n                report[\"trials\"].append(await run_trial(trial_root, args.operations, concurrency, args.seed + trial - 1, trial))\n        report[\"recovery_probes\"] = await recovery_probes(directory)\n    report[\"temporary_state_removed\"] = not directory.exists()\n    report[\"passed\"] = (all(t[\"errors\"] == 0 and t[\"mismatches\"] == 0 for t in report[\"trials\"])\n                        and all(p[\"passed\"] for p in report[\"recovery_probes\"]) and report[\"temporary_state_removed\"])\n    return report\n\n\ndef main():\n    args = parse_args()\n    report = asyncio.run(run(args))\n    output = json.dumps(report, indent=2, allow_nan=False) + \"\\n\"\n    if args.output:\n        # Exclusive create prevents accidental destruction of previous evidence.\n        with args.output.open(\"x\", encoding=\"utf-8\") as handle:\n            handle.write(output)\n        print(f\"Wrote {args.output.name}; passed={report['passed']}\")\n    else:\n        print(output, end=\"\")\n    return 0 if report[\"passed\"] else 1\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n"
+    }
+  },
+  "settings": {
+    "operations_per_trial": 100,
+    "trials_per_concurrency": 1,
+    "concurrency": [
+      1,
+      4,
+      8
+    ],
+    "seed": 20261025,
+    "vector_dimensions": 64,
+    "seed_entries": 32,
+    "max_entries": 256,
+    "ttl_seconds": 3600,
+    "distance_threshold": 0.1,
+    "operation_mix": {
+      "exact": 0.5,
+      "semantic": 0.2,
+      "miss": 0.2,
+      "store": 0.1
+    }
+  },
+  "measurement": {
+    "clock": "perf_counter",
+    "percentiles": "sorted linear interpolation, rank=(n-1)*p/100",
+    "latency_scope": "adapter await including its thread scheduling; excludes workload queue wait and setup",
+    "throughput_scope": "completed attempts divided by worker wall time, includes failures",
+    "state": "new temporary SQLite database for each trial; removed after run",
+    "provider_requests": 0,
+    "usd_estimate": null,
+    "limitations": "Closed-loop local workload; synthetic vectors are not evidence of embedding/model quality, production traffic, availability, SLO or hosted Redis performance."
+  },
+  "trials": [
+    {
+      "attempted": 100,
+      "successful": 100,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 0.6178000039653853,
+        "p50": 1.0174000053666532,
+        "p95": 2.9590000041935127,
+        "p99": 3.5082810079620685,
+        "max": 3.5459999926388264
+      },
+      "elapsed_seconds": 0.11668550000467803,
+      "attempted_per_second": 857.0045120943983,
+      "successful_per_second": 857.0045120943983,
+      "by_operation": {
+        "exact": {
+          "attempted": 50,
+          "successful": 50,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.6178000039653853,
+            "p50": 0.7543499959865585,
+            "p95": 1.1226550028368363,
+            "p99": 1.4546710025751959,
+            "max": 1.5488000062759966
+          }
+        },
+        "miss": {
+          "attempted": 20,
+          "successful": 20,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.9767000010469928,
+            "p50": 1.0408500020275824,
+            "p95": 1.3657249961397613,
+            "p99": 1.5378650018828919,
+            "max": 1.5809000033186749
+          }
+        },
+        "semantic": {
+          "attempted": 20,
+          "successful": 20,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.9781999979168177,
+            "p50": 1.0815999994520098,
+            "p95": 1.5131450003536884,
+            "p99": 1.5351090017065872,
+            "max": 1.5406000020448118
+          }
+        },
+        "store": {
+          "attempted": 10,
+          "successful": 10,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 2.635599987115711,
+            "p50": 2.959900004498195,
+            "p95": 3.5288549996039364,
+            "p99": 3.5425709940318484,
+            "max": 3.5459999926388264
+          }
+        }
+      },
+      "trial": 1,
+      "concurrency": 1,
+      "seed": 20261025,
+      "setup_store_calls_excluded": 32,
+      "samples": [
+        {
+          "operation": "miss",
+          "duration_ms": 1.2282000097911805,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.5117000002646819,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.5488000062759966,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8926000009523705,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.0658999963197857,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.958900004159659,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.752199994167313,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.106900002923794,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7303000020328909,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.8740999987348914,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.9381999989273027,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.130599994212389,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.022600001306273,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.0863000061362982,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.9598000033292919,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8270999969681725,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.9609000048367307,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 0.9781999979168177,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0207000013906509,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6178000039653853,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.635599987115711,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6709000008413568,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0732999944593757,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.0042000067187473,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6959000020287931,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.0092000011354685,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.9228999988408759,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.9064999903785065,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 3.5459999926388264,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.3543999957619235,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8603000023867935,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.015800007735379,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0283000010531396,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0295000101905316,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.756499997805804,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0872999991988763,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7427000091411173,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0417000012239441,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 3.205699991667643,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8256000000983477,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.5809000033186749,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7918000046629459,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7497999904444441,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.0190000029979274,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.1491000041132793,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 0.9767000010469928,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.0206000006292015,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7496999896829948,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.036100002238527,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.0412999981781468,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6810000049881637,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7257000106619671,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0430999973323196,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 3.3177000004798174,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.5406000020448118,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.9282999963033944,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.033300010021776,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8461999968858436,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8723999926587567,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.040400005877018,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0917999898083508,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7293999951798469,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7925999962026253,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7226000016089529,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6824000010965392,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6606999959331006,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 0.978900003246963,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0926999966613948,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7250999915413558,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0469999979250133,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.1606000043684617,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7143999973777682,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6720999954268336,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.356699998723343,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8775000023888424,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7183999987319112,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.044100004946813,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0758999997051433,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7696999964537099,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.098200009437278,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7421999907819554,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 3.5079000081168488,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.0313999955542386,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7446999952662736,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.779299989924766,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6901999877300113,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.0101999941980466,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.152400000137277,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7496000034734607,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8417000062763691,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0958999919239432,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6944999913685024,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0338000138290226,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.1509000032674521,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.699899996514432,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.0594000050332397,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7009999972069636,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7725999894319102,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6993999995756894,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.2605999945662916,
+          "status": "ok",
+          "error_type": ""
+        }
+      ]
+    },
+    {
+      "attempted": 100,
+      "successful": 100,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 0.3563999925972894,
+        "p50": 1.353799998469185,
+        "p95": 12.135890008357817,
+        "p99": 24.338124002097192,
+        "max": 27.76589999848511
+      },
+      "elapsed_seconds": 0.07836460000544321,
+      "attempted_per_second": 1276.0863960647282,
+      "successful_per_second": 1276.0863960647282,
+      "by_operation": {
+        "exact": {
+          "attempted": 50,
+          "successful": 50,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.3563999925972894,
+            "p50": 1.0089999996125698,
+            "p95": 12.587790000543462,
+            "p99": 21.231864996661887,
+            "max": 23.956999997608364
+          }
+        },
+        "miss": {
+          "attempted": 20,
+          "successful": 20,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.6695000047329813,
+            "p50": 1.6086499963421375,
+            "p95": 2.7213500034122267,
+            "p99": 3.0337100040924265,
+            "max": 3.111800004262477
+          }
+        },
+        "semantic": {
+          "attempted": 20,
+          "successful": 20,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.6412000075215474,
+            "p50": 1.2478500066208653,
+            "p95": 3.40303499542643,
+            "p99": 9.93956700025591,
+            "max": 11.573700001463294
+          }
+        },
+        "store": {
+          "attempted": 10,
+          "successful": 10,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.8303999929921702,
+            "p50": 2.4033000008785166,
+            "p95": 26.20782000012696,
+            "p99": 27.45428399881348,
+            "max": 27.76589999848511
+          }
+        }
+      },
+      "trial": 1,
+      "concurrency": 4,
+      "seed": 20261025,
+      "setup_store_calls_excluded": 32,
+      "samples": [
+        {
+          "operation": "miss",
+          "duration_ms": 1.4690999960293993,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.6589000006206334,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.6677999956300482,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 2.5621999957365915,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.5876999968895689,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.2964999914402142,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8252000116044655,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 2.4699000059626997,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.3474000006681308,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.1739000076195225,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0569000005489215,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.1938000097870827,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8188000065274537,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7979000074556097,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 0.9586999949533492,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.6341000009560958,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 3.8397999887820333,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 1.9736999965971336,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.407300001825206,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 0.6584000075235963,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 0.708499996108003,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.36750000435858965,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.3230000040493906,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.46019999717827886,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.3564000071492046,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 0.8303999929921702,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 0.6695000047329813,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.42270000267308205,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 0.6961000035516918,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 0.658900011330843,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 0.6597000028705224,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.3563999925972894,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 0.6412000075215474,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.35820000630337745,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 0.690999993821606,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 0.9018999990075827,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6831999926362187,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.629599995794706,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6485000048996881,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 18.3954999956768,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.5914999967208132,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 23.956999997608364,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.2499000004027039,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 27.76589999848511,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.3903999933972955,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 2.972999995108694,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 3.111800004262477,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 2.5616000057198107,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.934799991431646,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 4.396499993163161,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.2763000015402213,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.053999993018806,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6563000060850754,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6782999989809468,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8099000115180388,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7746999908704311,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 0.9556000004522502,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.241000005393289,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7619999960297719,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 11.573700001463294,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.114699993398972,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 12.090700009139255,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 12.994499993510544,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.5825999978696927,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.2775999930454418,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.3582999963546172,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 2.210400009062141,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.3316999906674027,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.565999995567836,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.5434999950230122,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 2.1662999934051186,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.5134999994188547,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.4214999973773956,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.760300001478754,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.5054000066593289,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.3609000016003847,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.8710000003920868,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.8487999914214015,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 2.1600000036414713,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.349300000583753,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 2.1924000029684976,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.245700001367368,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 2.700800003367476,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.9084999987389892,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6364999862853438,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6309000018518418,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.9036999981617555,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8082999993348494,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.3814999983878806,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.4295000000856817,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.1143000010633841,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.2547000078484416,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 2.3385999957099557,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.530300000216812,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.6482000064570457,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.5400999943958595,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.4134999946691096,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8853999897837639,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 0.9076999995158985,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 24.30350000213366,
+          "status": "ok",
+          "error_type": ""
+        }
+      ]
+    },
+    {
+      "attempted": 100,
+      "successful": 100,
+      "mismatches": 0,
+      "errors": 0,
+      "error_types": {},
+      "latency_ms": {
+        "min": 0.5382999952416867,
+        "p50": 3.15210000553634,
+        "p95": 18.926580005063443,
+        "p99": 21.57074200935319,
+        "max": 33.78159999556374
+      },
+      "elapsed_seconds": 0.05669979999947827,
+      "attempted_per_second": 1763.6746514259337,
+      "successful_per_second": 1763.6746514259337,
+      "by_operation": {
+        "exact": {
+          "attempted": 50,
+          "successful": 50,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.5382999952416867,
+            "p50": 3.2512000034330413,
+            "p95": 19.1793800018786,
+            "p99": 19.948859000433004,
+            "max": 20.135500002652407
+          }
+        },
+        "miss": {
+          "attempted": 20,
+          "successful": 20,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 0.857399994856678,
+            "p50": 3.442100001848303,
+            "p95": 6.464984993363033,
+            "p99": 7.232357008178949,
+            "max": 7.424200011882931
+          }
+        },
+        "semantic": {
+          "attempted": 20,
+          "successful": 20,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.0561999952187762,
+            "p50": 3.70804999693064,
+            "p95": 18.842405011673694,
+            "p99": 20.926401009928664,
+            "max": 21.447400009492412
+          }
+        },
+        "store": {
+          "attempted": 10,
+          "successful": 10,
+          "mismatches": 0,
+          "errors": 0,
+          "error_types": {},
+          "latency_ms": {
+            "min": 1.441300002625212,
+            "p50": 2.2955000022193417,
+            "p95": 20.25127000088107,
+            "p99": 31.075533996627204,
+            "max": 33.78159999556374
+          }
+        }
+      },
+      "trial": 1,
+      "concurrency": 8,
+      "seed": 20261025,
+      "setup_store_calls_excluded": 32,
+      "samples": [
+        {
+          "operation": "miss",
+          "duration_ms": 2.03719999990426,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 2.7414999931352213,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 3.2229000062216073,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.482499996200204,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.5382999952416867,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.4426999987335876,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.414899990777485,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.600499996333383,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.7325000042328611,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.9227000118698925,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8144000021275133,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 1.441300002625212,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.2378999963402748,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.836299998103641,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.0814999986905605,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.593100005062297,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.1956999951507896,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.195099994423799,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.451799995265901,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.9182000067085028,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.3575000048149377,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.1479000095278025,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.424999994924292,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 0.857399994856678,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.8571000071242452,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 1.5502999885939062,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.0561999952187762,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 1.7370999994454905,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 2.100300000165589,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.4893000043230131,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.1686999971279874,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.0928999981842935,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 0.6510999955935404,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.585599995451048,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 1.7918999947141856,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 18.705300011788495,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 18.901300005381927,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 3.058200003579259,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.2779999999329448,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 19.754599998123012,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 20.135500002652407,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.1709000031696633,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 2.122699996107258,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 4.178000002866611,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 3.0027000029804185,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 3.7324000004446134,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 4.699500001152046,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 6.414499992388301,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 5.169800002477132,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 4.689599998528138,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 3.7142000073799863,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.51800000842195,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 5.171800003154203,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 5.173500001546927,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.75220000569243,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 4.866000002948567,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.3315000036964193,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 4.131399997277185,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 3.6612999974749982,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.8826000014087185,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 5.291699999361299,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 4.766500002006069,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 33.78159999556374,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 5.912599997827783,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.90700000571087,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 5.239099991740659,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 4.397600001539104,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 4.843100003199652,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.7581999893300235,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 4.091800001333468,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.3919999948702753,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 4.376100012450479,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 5.56269999651704,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 1.9939000048907474,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 4.284099995857105,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.133300007903017,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 4.2351000010967255,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 5.915300003835,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.8401000056182966,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.970200002891943,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 1.8241000070702285,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 4.298599989851937,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 2.395900010014884,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.832400001352653,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.4742999996524304,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.925100012565963,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.979699991759844,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 2.750599989667535,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 3.2380999909946695,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "store",
+          "duration_ms": 1.8899999995483086,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 3.879600000800565,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 4.832799997529946,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 5.892400004086085,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 19.40689999901224,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 5.323600009432994,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 4.7224000009009615,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 21.447400009492412,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "miss",
+          "duration_ms": 7.424200011882931,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "exact",
+          "duration_ms": 5.391300001065247,
+          "status": "ok",
+          "error_type": ""
+        },
+        {
+          "operation": "semantic",
+          "duration_ms": 4.515900000114925,
+          "status": "ok",
+          "error_type": ""
+        }
+      ]
+    }
+  ],
+  "recovery_probes": [
+    {
+      "scenario": "cold_warm_reopen",
+      "passed": true,
+      "cold_miss": true,
+      "warm_hit": true,
+      "reopened_hit": true
+    },
+    {
+      "scenario": "bounded_eviction",
+      "passed": true,
+      "oldest_missing": true,
+      "newest_present": true,
+      "resident_entries": 2,
+      "max_entries": 2
+    },
+    {
+      "scenario": "real_clock_expiry_and_refill",
+      "passed": true,
+      "ttl_seconds": 0.1,
+      "waited_seconds": 0.21031480000237934,
+      "expired_miss": true,
+      "refill_hit": true
+    },
+    {
+      "scenario": "database_unavailable_and_restore",
+      "passed": true,
+      "failure_type": "OperationalError",
+      "failure_latency_ms": 0.5704000068362802,
+      "restored_hit": true,
+      "injection": "Private adapter path temporarily points to an absent parent directory"
+    },
+    {
+      "scenario": "writer_lock_and_release",
+      "passed": true,
+      "failure_type": "OperationalError",
+      "failure_latency_ms": 5556.523599996581,
+      "recovered_write_and_read": true,
+      "injection": "BEGIN IMMEDIATE held on a second connection until adapter timeout"
+    },
+    {
+      "scenario": "explicit_stats_accounting",
+      "passed": true,
+      "hits": 1,
+      "misses": 1,
+      "total": 2
+    }
+  ],
+  "temporary_state_removed": true,
+  "passed": true
+}
